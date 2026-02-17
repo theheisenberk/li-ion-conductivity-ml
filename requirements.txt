@@ -1,0 +1,11 @@
+scikit-learn
+pandas
+numpy
+pymatgen
+elementembeddings
+smact
+matplotlib
+seaborn
+optuna
+loguru
+

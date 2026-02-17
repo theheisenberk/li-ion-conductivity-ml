@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.eggs/
+
+# IDE / editor
+*.code-workspace
+.vscode/
+.idea/
+.cursor/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temp files
+*.aux
+*.log
+*.out
+*.toc
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+
+# Data — included in the repo (small dataset, ~600 entries)
+# data/
+
+# Archive (optional: include or exclude)
+# archive/
+
+# PDFs in root (reference papers, not project output)
+/*.pdf

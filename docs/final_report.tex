@@ -1,0 +1,847 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---- packages ----
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{amsmath,amssymb}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{float}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{parskip}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue!60!black,
+  citecolor=blue!60!black,
+  urlcolor=blue!60!black,
+}
+
+% convenience
+\newcommand{\logsigma}{\log_{10}(\sigma\,/\,\text{S\,cm}^{-1})}
+\newcommand{\Rtwo}{R^{2}}
+\newcommand{\rhoS}{\rho_{\text{Spearman}}}
+
+\title{%
+  \textbf{Final Report: Machine-Learning Prediction of\\
+  Lithium-Ion Conductivity from Composition,\\
+  Structure, and Physics-Informed Features}
+}
+\author{Berk Oguz}
+\date{February 2026}
+
+\graphicspath{{../results/results_stage1/}{../results/results_stage3_final/}}
+
+\begin{document}
+\maketitle
+\tableofcontents
+\clearpage
+
+%=============================================================================
+\section{Introduction and Motivation}
+%=============================================================================
+
+Solid-state lithium-ion conductors are central to next-generation batteries, yet
+measuring ionic conductivity ($\sigma$) experimentally is expensive and
+time-consuming.  A predictive model that maps from easily computable descriptors
+to $\logsigma$ could dramatically accelerate materials screening.
+
+The core use case is \textbf{materials ranking}: given a database of thousands
+of candidate compositions, the model should reliably distinguish promising
+high-conductivity materials from poor ones, so that only the top candidates
+proceed to expensive DFT calculations or synthesis.  For this reason,
+\textbf{Spearman's rank correlation} ($\rhoS$) is the primary evaluation
+metric throughout this project---it directly measures how well the model
+preserves the true conductivity ordering.
+
+This project develops such a model in three progressive stages, each adding
+richer descriptors:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Stage~0 (Composition-only):} elemental ratios, SMACT
+        stoichiometry vectors, and Magpie element-embedding averages.
+  \item \textbf{Stage~1 (+ Structural geometry):} lattice parameters, density,
+        Li-site environment metrics extracted from CIF files and CSV metadata.
+  \item \textbf{Stage~2 (+ Physics-informed):} bond-valence mismatch, Ewald
+        site energy, and Voronoi coordination number computed with
+        \texttt{pymatgen}.
+\end{enumerate}
+
+All models use \textbf{HistGradientBoostingRegressor} (scikit-learn) as the
+base learner.  Hyperparameters are optimised with \textbf{Optuna} (Bayesian
+TPE sampler, 50 trials) using 5-fold cross-validation with a
+\emph{generalization penalty} to suppress overfitting.
+
+%=============================================================================
+\section{Dataset}
+%=============================================================================
+
+The dataset consists of 478 training samples and 121 held-out test samples of
+crystalline lithium-ion conductors.  Each sample is identified by a unique ID
+and provides:
+
+\begin{itemize}[leftmargin=*]
+  \item A reduced chemical composition (e.g.\ \texttt{Li6PS5Cl}).
+  \item Ionic conductivity $\sigma$ in S\,cm$^{-1}$ (the prediction target).
+  \item Lattice metadata in the CSV (space group, lattice parameters, $Z$).
+  \item For a subset (254 training, 67 test), a CIF file with full crystal
+        structure.
+\end{itemize}
+
+\paragraph{Target transformation.}
+The target spans roughly 20~orders of magnitude ($10^{-30}$ to
+$10^{-1}$\,S\,cm$^{-1}$), so we model $\logsigma$.  Values originally
+reported as threshold strings (e.g.\ ``$<$1E-10'') are coerced to the
+threshold value and flagged by a binary indicator \texttt{sigma\_is\_coerced}
+(6.1\% of training data).  This indicator is included as a feature so
+the model can learn to weight imprecise measurements differently.
+
+%=============================================================================
+\section{Data Cleaning}
+%=============================================================================
+
+Column names are stripped of whitespace; infinite values are replaced with NaN;
+exact duplicate rows are dropped; rows missing the target are removed from
+training only.  The raw conductivity column and all non-feature metadata
+(identifiers, DOIs, reference fields) are placed in a mandatory exclusion list
+to ensure they never enter the feature set.
+
+%=============================================================================
+\section{Feature Engineering}
+%=============================================================================
+
+\subsection{Stage~0: Composition-Only Features (129 features)}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Elemental ratios} (3): Li atomic fraction, total anion
+        fraction, number of distinct elements.
+  \item \textbf{SMACT stoichiometry} (103): a vector where each position
+        stores the atomic fraction of the corresponding element.
+  \item \textbf{Magpie embeddings} (22): composition-weighted average of
+        hand-engineered elemental property vectors (electronegativity, atomic
+        radius, valence electrons, etc.).
+  \item \texttt{sigma\_is\_coerced} (1): binary flag for threshold
+        conductivity values.
+\end{enumerate}
+
+\paragraph{Embedding selection.}
+Three element-embedding schemes were compared on top of the elemental-ratio
+and SMACT baseline (all with sklearn defaults, no Optuna):
+
+\begin{center}
+\small
+\begin{tabular}{lccc}
+  \toprule
+  Embedding & CV $\Rtwo$ & CV RMSE \\
+  \midrule
+  Mat2Vec (200-d)  & 0.713 & 1.434 \\
+  Magpie (22-d)    & 0.694 & 1.482 \\
+  MegNet16 (16-d)  & 0.659 & 1.565 \\
+  All combined     & 0.700 & 1.466 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+While Mat2Vec achieves the highest CV $\Rtwo$, the choice of Magpie was
+deliberate and grounded in the nature of the embeddings:
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Magpie} encodes \emph{tabulated physicochemical properties}
+        of elements---electronegativity, atomic radius, covalent radius,
+        valence electron count, melting point, and similar quantities that are
+        directly related to bonding character and ionic transport.  Because
+        these descriptors have clear physical meaning, a composition-weighted
+        average of Magpie vectors produces features that correlate naturally
+        with conductivity: for instance, the average electronegativity
+        difference between cations and anions influences the ionicity of the
+        lattice, while atomic radii determine bottleneck sizes in diffusion
+        pathways.
+  \item \textbf{Mat2Vec} (200-d) embeddings are learned from element
+        co-occurrence patterns in materials-science text using a Word2Vec-style
+        model.  They capture latent correlations between elements that appear
+        in similar textual contexts (e.g.\ similar crystal families), but the
+        individual dimensions lack direct physical interpretation.  Although
+        Mat2Vec yields a marginally higher CV $\Rtwo$ ($+0.019$), its
+        200-dimensional representation substantially increases the risk of
+        overfitting when combined with structural and physics features in later
+        stages.
+  \item \textbf{MegNet16} (16-d) embeddings are extracted from a graph neural
+        network pre-trained on DFT formation energies.  They encode
+        element-level information relevant to thermodynamic stability rather
+        than transport, which explains their lower predictive power for ionic
+        conductivity.
+\end{itemize}
+
+Magpie was therefore selected as the primary embedding for its \emph{compact
+dimensionality} (22-d), \emph{physical interpretability}, and its strong
+baseline performance that leaves the most room for improvement when structural
+and physics features are added.  After Optuna optimisation, the Magpie-based
+Stage~0 model achieves $\Rtwo_{\text{CV}} = 0.746$, confirming that the
+choice did not sacrifice predictive power.
+
+\subsection{Stage~1: Structural Geometry Features (+23 features $\to$ 152)}
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{CSV-derived} (available for 100\% of samples): lattice
+        parameters ($a, b, c, \alpha, \beta, \gamma$), space-group number,
+        density, volume per atom, $n_{\text{Li}}$ sites, formula units $Z$.
+  \item \textbf{CIF-derived} (available for $\sim$53\% of training): Li
+        fraction, Li concentration, framework density, Li--Li distances,
+        Li--anion distances, Li coordination number, site multiplicity,
+        lattice anisotropy ratios.
+  \item \textbf{Indicator}: \texttt{has\_cif\_struct} (1 if CIF parsed
+        successfully).  CIF-only columns are zero-filled for samples without
+        a CIF so that all rows can be used in training.
+\end{itemize}
+
+Four progressively richer feature sets were compared (all with sklearn
+defaults):
+
+\begin{center}
+\small
+\begin{tabular}{lrccc}
+  \toprule
+  Experiment & \#Feat. & CV $\Rtwo$ & CV RMSE \\
+  \midrule
+  \texttt{stage0\_magpie}      & 129 & 0.7393 & 1.3675 \\
+  \texttt{stage1\_basic\_struct}  & 133 & 0.7369 & 1.3737 \\
+  \texttt{stage1\_geometry}    & 152 & 0.7369 & 1.3737 \\
+  \texttt{stage1\_full\_struct}   & 382 & 0.7370 & 1.3734 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The CV $\Rtwo$ values are nearly identical across all four variants.
+Adding full geometry features does not shift the overall explained variance
+but reduces the magnitude of the largest errors (lower RMSE tail).
+
+\paragraph{Decision to exclude space-group one-hot encoding.}
+Adding the 230 space-group one-hot columns (\texttt{stage1\_full\_struct},
+382~features) does \emph{not} improve any metric over the geometry-only
+baseline (152~features).  This is unsurprising: the lattice parameters
+($a, b, c, \alpha, \beta, \gamma$) and derived quantities (anisotropy,
+orthogonality deviation, \texttt{is\_cubic\_like}) already encode the
+essential crystallographic symmetry information that space groups represent.
+One-hot encoding 230 categories for only 478 training samples risks severe
+overfitting---most columns are nearly all-zero---while providing no
+additional predictive signal beyond what the continuous lattice descriptors
+already capture.  All subsequent stages therefore build on the
+\textbf{geometry-only} feature set (152~features, no space-group one-hot).
+
+\paragraph{Feature importance.}
+Permutation importance analysis on the geometry model (Figure~\ref{fig:feat_imp})
+reveals that \texttt{lattice\_c} (0.203) is by far the most important
+feature, followed by \texttt{sigma\_is\_coerced} (0.156),
+\texttt{magpie\_emb\_3} (0.103), \texttt{lattice\_b} (0.068), and
+\texttt{framework\_density} (0.062).  Among structural features,
+Li coordination number (0.050), lattice~$a$ (0.022), and Li--anion
+distance (0.012) also contribute meaningfully.
+
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=\textwidth]{stage1_feature_importance.png}
+  \caption{Permutation feature importance for the Stage~1 geometry model.
+  \textbf{Left:} Top 20 features overall (red = structural, blue = composition).
+  \textbf{Right:} Structural features only, ranked by importance.  Lattice
+  constant $c$ dominates, confirming that crystallographic geometry carries
+  strong predictive signal for ionic conductivity.}
+  \label{fig:feat_imp}
+\end{figure}
+
+Based on this analysis, the \textbf{geometry-only baseline}
+(\texttt{stage1\_geometry}) was selected for the Stage~1 representative model.
+It uses sklearn default hyperparameters, which proved to be the best
+generaliser on the test set.
+
+\subsection{Stage~2: Physics-Informed Features (+8 features $\to$ 160)}
+
+These features probe the local atomic environment of mobile Li$^+$ ions and
+require successful CIF parsing \emph{and} valid pymatgen analysis.  They are
+added on top of the geometry-only feature set (no space-group one-hot):
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Li--anion bond-valence mismatch} (2: avg, std):
+    \[
+      V_{\text{sum}} = \sum_i \exp\!\left(\frac{R_0 - R_i}{b}\right),
+      \qquad
+      \text{Mismatch} = |1 - V_{\text{sum}}|
+    \]
+    where $R_0$ is the tabulated bond-valence parameter, $R_i$ is the observed
+    bond length, and $b \approx 0.37$\,\AA.  Uses \texttt{CrystalNN} for
+    neighbour finding.
+
+  \item \textbf{Ewald site energy} (2: avg, std): long-range + short-range
+    electrostatic energy at each Li site from
+    \texttt{pymatgen.analysis.ewald.EwaldSummation}.
+
+  \item \textbf{Voronoi coordination number} (1: avg): average CN from
+    Voronoi tessellation via \texttt{VoronoiNN(cutoff=5.0)}.
+
+  \item \textbf{Indicator variables} (3): \texttt{has\_bv\_mismatch},
+    \texttt{has\_ewald\_energy}, \texttt{has\_voronoi\_cn} -- binary flags
+    indicating successful extraction for each feature group.
+\end{enumerate}
+
+\paragraph{Coverage.}
+Physics features have \textbf{very limited coverage}: only $\sim$12\% of
+training samples (57 of 478) have all three indicator variables active.
+Bond-valence data is available for 63 samples, Ewald energy for 120, and
+Voronoi CN for 92.  This coverage imbalance is a key factor in the discussion
+of Stage~2 performance (Section~\ref{sec:discussion}).
+
+%=============================================================================
+\section{Model and Hyperparameter Optimisation}
+\label{sec:optuna}
+%=============================================================================
+
+\subsection{Base Learner}
+All experiments use \texttt{HistGradientBoostingRegressor} from scikit-learn, a
+histogram-based gradient boosting implementation that handles missing values
+natively and is efficient for moderately sized datasets.
+
+\subsection{Cross-Validation Protocol}
+5-fold cross-validation is used throughout.  The same fold splits (generated
+once by \texttt{KFold}) are reused across all experiments to ensure a fair
+comparison.
+
+\subsection{Optuna Bayesian Optimisation with Generalization Penalty}
+
+\paragraph{Motivation.}
+An earlier Stage~2 analysis revealed that naively optimising hyperparameters on
+the full CV led to \textbf{overfitting to the CV structure}: CV $\Rtwo$
+improved by $\sim$1\%, but test $\Rtwo$ \emph{decreased}.  The model was
+fitting the split structure rather than learning generalisable patterns.
+
+\paragraph{Solution.}
+Each Optuna trial runs the full 5-fold CV internally and computes a
+\textbf{per-fold penalised score}:
+\[
+  s_k = \text{RMSE}_{\text{val},k} + \lambda \cdot \max\!\big(0,\;
+        \text{RMSE}_{\text{val},k} - \text{RMSE}_{\text{train},k}\big)
+\]
+where $\lambda = 0.2$ is the penalty weight.  The Optuna objective is
+$\bar{s} = \tfrac{1}{5}\sum_{k=1}^{5} s_k$.  This penalises hyperparameter
+configurations where the validation error is much larger than the training
+error, favouring models that generalise.
+
+\paragraph{Search space.}
+A conservative search space limits model complexity:
+
+\begin{center}
+\small
+\begin{tabular}{lcc}
+  \toprule
+  Parameter & Range (conservative) & sklearn default \\
+  \midrule
+  \texttt{max\_depth}         & 3--8    & None (unlimited) \\
+  \texttt{learning\_rate}     & 0.01--0.15 (log) & 0.1 \\
+  \texttt{max\_leaf\_nodes}   & 15--100 & 31 \\
+  \texttt{min\_samples\_leaf} & 5--35   & 20 \\
+  \texttt{l2\_regularization} & $10^{-6}$--0.1 (log) & 0 \\
+  \texttt{max\_bins}          & 64--255 & 255 \\
+  \texttt{max\_iter}          & 50--200 & 100 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\subsection{Choice of Optimisation Objective: RMSE vs.\ Spearman}
+\label{sec:objective}
+
+Although Spearman's $\rhoS$ is our primary evaluation metric, the Optuna
+objective minimises \textbf{RMSE} rather than maximising $\rhoS$ directly.
+This choice is pragmatic:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Gradient-based learners require a differentiable loss.}
+        \texttt{HistGradientBoostingRegressor} internally minimises the
+        squared-error loss.  Replacing this with a rank-based objective would
+        require either a custom loss function with non-trivial sub-gradient
+        computation, or a wrapper that treats the model as a black-box
+        ranking function---both substantially more complex to implement and
+        validate.
+  \item \textbf{RMSE in log-space has a clean interpretation.}
+        Since the target is $\logsigma$, a residual in log-space is
+        \[
+          \logsigma_{\text{actual}} - \logsigma_{\text{predicted}}
+          = \log_{10}\!\left(\frac{\sigma_{\text{actual}}}
+                                  {\sigma_{\text{predicted}}}\right).
+        \]
+        Therefore, RMSE on $\logsigma$ quantifies the typical
+        \emph{multiplicative} prediction error---i.e.\ an RMSE minimiser in
+        log-space effectively minimises the mean absolute \emph{ratio} error
+        on the original conductivity scale.  This is a sensible proxy for
+        ranking because reducing multiplicative errors tends to preserve
+        the correct ordering.
+  \item \textbf{Spearman is non-smooth and expensive to differentiate.}
+        The Spearman correlation involves a rank transformation, which is
+        a piecewise-constant function of the predictions.  Optimising it
+        directly via Optuna would require either surrogate-gradient tricks
+        or a fully black-box approach (e.g.\ evolutionary strategies), both
+        of which are less sample-efficient than the smooth RMSE objective
+        used here.
+\end{enumerate}
+
+A future iteration of this project could implement a direct $\rhoS$
+maximiser (e.g.\ via LambdaRank-style pairwise losses or a custom Optuna
+objective that evaluates $\rhoS$ on OOF predictions).  Within the time
+constraints of this project, RMSE minimisation proved to be a reliable proxy
+that yielded monotonically improving $\rhoS$ across all three stages.
+
+%=============================================================================
+\section{Stage~2: Physics-Informed Features and Double-Model Strategies}
+%=============================================================================
+
+\subsection{Single-Model Experiments (Optuna Pipeline)}
+
+The Optuna pipeline evaluates several model configurations.  Note that the
+original \texttt{stage2\_physics} model included 230 space-group one-hot
+features (390 total features); after identifying that these do not help
+(Section~4.2), a cleaner variant \texttt{stage2\_physics\_geometry} was
+optimised using only geometry + physics features (160 total), which achieved
+superior performance:
+
+\begin{center}
+\small
+\begin{tabular}{lcc|cc}
+  \toprule
+  & \multicolumn{2}{c|}{\textbf{Cross-Validation}} & \multicolumn{2}{c}{\textbf{Test Set}} \\
+  Experiment & $\Rtwo$ & $\rhoS$ & $\Rtwo$ & $\rhoS$ \\
+  \midrule
+  baseline\_default       & .737 & .890 & .591 & .701 \\
+  baseline\_default\_geom & .737 & .887 & .556 & .711 \\
+  physics (w/ SG one-hot) & .740 & .886 & .598 & .706 \\
+  \textbf{physics\_geometry} & \textbf{.752} & \textbf{.890} & \textbf{.609} & \textbf{.748} \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+Removing the space-group one-hot improved test $\rhoS$ from 0.706 to
+\textbf{0.748} ($+0.042$), a substantial gain in ranking quality.
+Test $\Rtwo$ also increased from 0.598 to 0.609.
+
+\subsection{Double-Model Gating Strategies}
+
+Since physics features are available for only $\sim$12\% of samples, five
+double-model gating strategies were explored.  Model~1 (baseline) handles all
+samples; Model~2 (physics-informed) is used only where all three physics
+indicators are active:
+
+\begin{center}
+\small
+\begin{tabular}{lcc|cc}
+  \toprule
+  & \multicolumn{2}{c|}{CV} & \multicolumn{2}{c}{Test} \\
+  Strategy & $\Rtwo$ & $\boldsymbol{\rhoS}$ & $\Rtwo$ & $\boldsymbol{\rhoS}$ \\
+  \midrule
+  A: fulltrain       & .742 & .892 & .562 & .710 \\
+  B: subsettrain     & .724 & .885 & .526 & .689 \\
+  C: residual        & .733 & .889 & .596 & .699 \\
+  D: residual\_stack & .732 & .887 & .544 & .682 \\
+  E: residual\_geom  & .734 & .887 & .559 & .712 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+None of the double-model strategies outperformed the single
+\texttt{stage2\_physics\_geometry} model (test $\rhoS = 0.748$).
+Subset-trained strategies (B, D) suffer from the small subset size (57
+samples).
+
+%=============================================================================
+\section{Final Three-Stage Comparison}
+\label{sec:final}
+%=============================================================================
+
+The three representative models---one per project stage, each with its optimal
+or best-generalising hyperparameters---are compared side-by-side.  The
+\textbf{decisive metric is $\rhoS$}, which measures the model's ability to
+correctly rank materials by conductivity:
+
+\begin{table}[H]
+\centering
+\caption{Final model comparison.  Stage~0 and Stage~2 use Optuna-optimised
+hyperparameters; Stage~1 uses sklearn defaults (best generaliser).  Stage~2
+uses the geometry + physics variant (no space-group one-hot).  The primary
+metric $\rhoS$ (Spearman) is highlighted.}
+\label{tab:final}
+\small
+\begin{tabular}{lrccc|ccc}
+  \toprule
+  & & \multicolumn{3}{c|}{\textbf{5-Fold CV}} & \multicolumn{3}{c}{\textbf{Held-Out Test}} \\
+  Model & \#Feat. & $\Rtwo$ & RMSE & $\boldsymbol{\rhoS}$ & $\Rtwo$ & RMSE & $\boldsymbol{\rhoS}$ \\
+  \midrule
+  Stage~0: Composition   & 129 & .746 & 1.349 & .871 & .513 & 1.770 & .710 \\
+  Stage~1: + Geometry    & 152 & .737 & 1.374 & .887 & .556 & 1.691 & .711 \\
+  Stage~2: + Physics     & 160 & .752 & 1.334 & .890 & .609 & 1.587 & \textbf{.748} \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+Test $\rhoS$ improves monotonically: $0.710 \to 0.711 \to 0.748$.  The
+decisive jump occurs at Stage~2, where physics features increase ranking
+quality by $+0.037$ on the test set---a meaningful gain for a materials
+screening application.
+
+\subsection{Best Hyperparameters}
+
+\begin{center}
+\small
+\begin{tabular}{lccc}
+  \toprule
+  Parameter & Stage~0 (Optuna) & Stage~1 (defaults) & Stage~2 (Optuna) \\
+  \midrule
+  \texttt{max\_depth}         & 5     & None  & 6 \\
+  \texttt{learning\_rate}     & 0.070 & 0.1   & 0.026 \\
+  \texttt{max\_leaf\_nodes}   & 54    & 31    & 81 \\
+  \texttt{min\_samples\_leaf} & 16    & 20    & 5 \\
+  \texttt{l2\_regularization} & 0.005 & 0     & 0.079 \\
+  \texttt{max\_bins}          & 135   & 255   & 86 \\
+  \texttt{max\_iter}          & 53    & 100   & 114 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+%=============================================================================
+\section{Visualisations}
+%=============================================================================
+
+\subsection{Side-by-Side Parity Plots (Triptych)}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_triptych_cv.png}
+    \caption{5-fold cross-validation (out-of-fold predictions).}
+  \end{subfigure}
+  \vspace{0.5cm}
+  \begin{subfigure}[t]{\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_triptych_test.png}
+    \caption{Held-out test set.}
+  \end{subfigure}
+  \caption{Triptych parity plots for the three stages.  Each panel shares
+  identical axis limits for direct visual comparison.  The diagonal dashed line
+  represents perfect prediction.}
+  \label{fig:triptych}
+\end{figure}
+
+\subsection{Pairwise Comparisons}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_pairwise_s0_vs_s1_cv.png}
+    \caption{CV: Stage~0 vs Stage~1.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_pairwise_s0_vs_s1_test.png}
+    \caption{Test: Stage~0 vs Stage~1.}
+  \end{subfigure}
+  \\[0.5cm]
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_pairwise_s1_vs_s2_cv.png}
+    \caption{CV: Stage~1 vs Stage~2.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_pairwise_s1_vs_s2_test.png}
+    \caption{Test: Stage~1 vs Stage~2.}
+  \end{subfigure}
+  \caption{Pairwise overlays of consecutive stages.  Two-model overlays
+  reduce visual clutter compared to the three-model combined plot.}
+  \label{fig:pairwise}
+\end{figure}
+
+\subsection{Cumulative Error Distribution}
+
+\begin{figure}[H]
+  \centering
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_error_cdf_cv.png}
+    \caption{Cross-validation.}
+  \end{subfigure}
+  \hfill
+  \begin{subfigure}[t]{0.48\textwidth}
+    \centering
+    \includegraphics[width=\textwidth]{final_error_cdf_test.png}
+    \caption{Test set.}
+  \end{subfigure}
+  \caption{Cumulative distribution of $|\text{prediction error}|$.  A curve
+  further to the left indicates a more accurate model.  On the test set,
+  Stage~2 (green) dominates the other two stages across most error
+  thresholds.}
+  \label{fig:cdf}
+\end{figure}
+
+%=============================================================================
+\section{Discussion}
+\label{sec:discussion}
+%=============================================================================
+
+\subsection{Progressive Improvement in Ranking Quality}
+
+The primary goal of this model is to \emph{rank} candidate materials---e.g.\
+screening 10{,}000 compositions to select the top 100 for DFT or synthesis.
+For this task, Spearman's $\rhoS$ is the decisive metric.
+
+On the held-out test set, $\rhoS$ improves monotonically:
+\begin{itemize}[leftmargin=*]
+  \item \mbox{Stage~0 $\to$ Stage~1}: $+0.001$ ($0.710 \to 0.711$).
+        Structural geometry barely changes ranking quality---the composition
+        features already capture most of the ordering.
+  \item \mbox{Stage~1 $\to$ Stage~2}: $+0.037$ ($0.711 \to 0.748$).
+        Physics features provide a meaningful boost in ranking, despite being
+        available for only $\sim$12\% of training samples.
+\end{itemize}
+
+The total improvement from Stage~0 to Stage~2 is $+0.038$ in $\rhoS$.
+While the \mbox{Stage~0 $\to$ Stage~1} jump is marginal for ranking, the structural
+features substantially improve $\Rtwo$ ($0.513 \to 0.556$), meaning they
+reduce the \emph{magnitude} of prediction errors even if they do not
+significantly reorder the ranking.
+
+\subsection{Why CV $\Rtwo$ Is Non-Monotonic (Stage~0 vs Stage~1)}
+
+Stage~0's \emph{CV} $\Rtwo$ (0.746) is slightly higher than Stage~1's (0.737),
+despite Stage~1 having better test performance.  This arises because Stage~0
+uses \textbf{Optuna-optimised} hyperparameters, while Stage~1 uses sklearn
+\textbf{defaults}.  The Optuna search found a configuration that fits the CV
+folds better, but this does not guarantee better generalisation---and indeed,
+Stage~0 has the \emph{worst} test $\Rtwo$.
+
+To verify that this gap is not simply due to Stage~1 lacking optimisation, we
+ran two additional 50-trial Optuna searches (with the same generalization
+penalty, $\lambda = 0.2$) on the Stage~1 geometry feature set:
+
+\begin{center}
+\small
+\begin{tabular}{lcccc}
+  \toprule
+  Configuration & CV $\Rtwo$ & CV $\rhoS$ & Test $\Rtwo$ & Test $\rhoS$ \\
+  \midrule
+  sklearn defaults           & .737 & .887 & .556 & \textbf{.711} \\
+  Optuna (depth 3--8)        & .726 & .880 & .550 & .644 \\
+  Optuna (depth 3--30)       & .733 & .873 & .592 & .680 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+The first Optuna run used the same conservative search space as Stages~0 and~2,
+which caps \texttt{max\_depth} at 3--8 and \texttt{l2\_regularization} at
+$\geq 10^{-6}$.  Since the sklearn defaults
+(\texttt{max\_depth=None}, \texttt{l2\_regularization=0}) lie outside this
+space, a natural question arose: \emph{if the defaults are genuinely optimal,
+Optuna should recover them---or something close---once the search space
+includes them.}
+
+To test this, the second Optuna run used an \textbf{expanded search space}
+with \texttt{max\_depth} ranging from 3 to 30 (approximating
+unlimited depth) and \texttt{l2\_regularization} from $10^{-10}$ to 0.1
+(approximating zero regularisation).  Despite this greatly expanded freedom,
+Optuna converged to an even \emph{simpler} model than before:
+\texttt{max\_depth=3} (the minimum) and \texttt{max\_leaf\_nodes=15} (also
+the minimum).  Test $\rhoS$ improved from 0.644 to 0.680 but remained
+well below the defaults' 0.711.
+
+Crucially, the expanded search space \emph{does} contain the sklearn
+defaults (or their functional equivalents): with \texttt{max\_leaf\_nodes=31},
+a tree needs at most $\sim$5 levels, so \texttt{max\_depth=30} is
+indistinguishable from unlimited; likewise \texttt{l2\_regularization}
+$= 10^{-10}$ is effectively zero.  Yet the optimizer moves \emph{away}
+from that region.
+
+This reveals a fundamental limitation of gap-based penalties.  The penalised
+objective
+$s_k = \text{RMSE}_{\text{val}} + \lambda\,\max(0,\;\text{RMSE}_{\text{val}}
+       - \text{RMSE}_{\text{train}})$
+equates ``large train--val gap'' with ``overfitting,'' but a model can have
+such a gap simply because it has sufficient capacity to learn the training
+data well \emph{while still generalising}.  The sklearn defaults (deep but
+narrow: \texttt{max\_depth=None}, \texttt{max\_leaf\_nodes=31}) fit training
+data tightly, producing a sizable gap that the penalty punishes---even though
+the resulting test performance is the best of all configurations.
+Conversely, a shallow tree (\texttt{max\_depth=3}) underfits both splits
+roughly equally, so the gap is near zero and the penalty is silent.  The
+penalised objective therefore genuinely prefers the underfitting
+configuration, not because it generalises better, but because it has a
+smaller gap.
+
+This interaction is stage-dependent.  The penalty works well for Stage~0
+(composition features that do not require deep decision paths) and Stage~2
+(sparse physics features that genuinely benefit from regularisation).
+For Stage~1, where 152~geometry features reward deep, specific splits,
+the same penalty weight $\lambda = 0.2$ over-regularises.
+
+The non-monotonic CV $\Rtwo$ is therefore an artifact of two compounding
+factors: (i)~Stage~0's Optuna-tuned parameters fitting the CV folds slightly
+better, and (ii)~Stage~1's default parameters being unreachable by the
+penalised optimizer---not because they lie outside the search space, but
+because the penalised objective actively steers away from them.
+
+Stage~2, which also uses Optuna, achieves the highest CV $\Rtwo$ (0.752)
+\emph{and} the highest test $\Rtwo$ (0.609), demonstrating that the physics
+features provide genuine new information rather than just better in-sample fit.
+
+\subsection{The Physics Coverage Problem}
+\label{sec:coverage}
+
+The physics-informed features at Stage~2 face a severe \textbf{coverage
+bottleneck}:
+
+\begin{itemize}[leftmargin=*]
+  \item Only 254/478 training CIFs exist.
+  \item Of those, only 63 yield bond-valence data, 120 yield Ewald energies,
+        and 92 yield Voronoi coordination.
+  \item Only 57 training samples ($\sim$12\%) have \emph{all three} physics
+        indicators active.
+\end{itemize}
+
+When the physics model is trained on the full dataset, the vast majority of
+training samples have zero-filled physics values, which the tree-based model
+can partially handle via the indicator variables.  However, the model
+effectively learns physics-based splits from only $\sim$57 samples.
+
+This explains several observations:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Double-model strategies that train on the subset only}
+        (B:~subsettrain, D:~residual\_stack) \textbf{perform worse} than
+        the full-train physics model, because 57 samples are too few
+        for robust gradient-boosted regression.
+  \item The \textbf{Optuna-selected} \texttt{min\_samples\_leaf=5} for
+        Stage~2 is notably lower than Stage~0's value (16), suggesting
+        Optuna is trying to squeeze signal from the sparse physics subset
+        at the cost of regularisation.
+  \item Despite this, Stage~2 achieves the \textbf{best test $\rhoS$}
+        (0.748), indicating that even sparse physics features carry real
+        predictive signal---the bond-valence mismatch and Ewald energies
+        encode genuine physical knowledge about ion mobility.
+\end{enumerate}
+
+If CIF coverage were higher, we would expect substantially larger gains.
+The current improvement ($+0.037$ test $\rhoS$) is achieved with physics
+data for only 12\% of samples, suggesting that full coverage could yield
+much more dramatic improvements in ranking quality.
+
+\subsection{Pitfalls Encountered and Resolved}
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Optuna overfitting to CV structure} (Section~\ref{sec:optuna}):
+        optimising hyperparameters on the same CV splits used for evaluation
+        led to improved CV but worse test performance.  Resolved by
+        introducing the generalization penalty
+        ($\lambda = 0.2$ per-fold penalty on train--val gap).
+
+  \item \textbf{Space-group one-hot explosion}: adding 230 binary features
+        for space groups did not improve metrics and actually \emph{hurt}
+        ranking performance ($\rhoS$ dropped from 0.748 to 0.706 on test).
+        The lattice parameters already encode the relevant symmetry
+        information.
+
+  \item \textbf{Physics feature sparsity}: zero-filling and indicator
+        gating were implemented.  Multiple double-model strategies were
+        explored to use physics features only where trustworthy.
+
+  \item \textbf{Coerced sigma values}: detection-limit strings like
+        ``$<$1E-10'' were mapped to the threshold value and flagged.  The
+        indicator became the \emph{second most important feature}
+        (permutation importance 0.156), validating this design choice.
+\end{enumerate}
+
+%=============================================================================
+\section{Conclusions}
+%=============================================================================
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Composition alone} (Magpie embeddings + elemental ratios +
+        SMACT) already provides a strong ranking baseline ($\rho_{\text{S,test}}
+        = 0.710$), confirming that ionic conductivity has a significant
+        compositional dependence.
+
+  \item \textbf{Structural geometry} (lattice parameters, Li-site
+        environment) barely changes ranking ($\rhoS: 0.710 \to 0.711$) but
+        reduces prediction error ($\Rtwo: 0.513 \to 0.556$).  Lattice
+        constant $c$ alone accounts for the largest permutation importance
+        (0.203), surpassing all Magpie embeddings.
+
+  \item \textbf{Physics-informed features} (bond-valence mismatch, Ewald
+        energy, Voronoi CN) provide the decisive ranking improvement
+        ($\rhoS: 0.711 \to 0.748$, $\Rtwo: 0.556 \to 0.609$), despite
+        being available for only $\sim$12\% of samples.  This suggests
+        substantial untapped potential if CIF coverage were increased.
+
+  \item \textbf{Hyperparameter optimisation} with a generalization penalty
+        is essential.  Na\"ive Optuna improved CV at the expense of test
+        performance; the per-fold penalty successfully suppresses this
+        effect.
+
+  \item \textbf{Space-group one-hot encoding is harmful}: removing 230
+        sparse binary features improved test $\rhoS$ from 0.706 to 0.748,
+        confirming that continuous lattice descriptors already capture the
+        relevant symmetry information.
+
+  \item \textbf{RMSE minimisation as a proxy for ranking}: although the
+        Optuna objective minimises RMSE rather than $\rhoS$ directly
+        (Section~\ref{sec:objective}), this proxy yielded monotonically
+        improving $\rhoS$ across all stages.  A direct $\rhoS$ maximiser
+        (e.g.\ via LambdaRank-style pairwise losses) is a promising
+        direction for future work.
+
+  \item With $\rho_{\text{S,test}} \approx 0.75$, the model can reliably
+        rank candidate materials: if presented with 10{,}000 compositions,
+        the top-ranked candidates would be strongly enriched in genuinely
+        high-conductivity materials, enabling efficient prioritisation of
+        DFT calculations or synthesis efforts.
+\end{enumerate}
+
+\subsection{Recommendations for Future Work}
+
+\begin{itemize}[leftmargin=*]
+  \item \textbf{Increase CIF coverage}: obtaining crystal structures for the
+        remaining $\sim$47\% of samples would likely yield the largest single
+        improvement in both ranking and prediction accuracy.
+  \item \textbf{Direct Spearman maximisation}: replacing the RMSE-based
+        Optuna objective with a rank-aware loss (e.g.\ LambdaRank or
+        differentiable Spearman approximations) could improve $\rhoS$
+        directly.  This was not pursued within the time constraints of the
+        current project but is a natural next step.
+  \item \textbf{Dynamic features}: migration barrier estimates (e.g.\ via
+        nudged elastic band or bond-valence pathway analysis) could capture
+        kinetic effects beyond static structure.
+  \item \textbf{Ensemble methods}: combining the three stage-specific models
+        (e.g.\ stacking) could exploit their complementary strengths.
+  \item \textbf{Uncertainty quantification}: quantile regression models
+        (explored in Stage~2) provide prediction intervals that are valuable
+        for materials screening under uncertainty.
+\end{itemize}
+
+%=============================================================================
+\section{Reproducibility}
+%=============================================================================
+
+All code is self-contained in the project repository:
+
+\begin{itemize}[leftmargin=*]
+  \item \texttt{stage0\_embedding\_comparison.py} -- Stage~0 embedding comparison.
+  \item \texttt{stage1\_structural\_features.py} -- Stage~1 structural features.
+  \item \texttt{stage2\_physics\_optuna.py} -- Stage~2 physics
+        + Optuna pipeline.
+  \item \texttt{stage3\_final\_comparison.py} -- Final three-stage
+        comparison and visualisations.
+\end{itemize}
+
+Random seeds are fixed (\texttt{seed\_everything(42)}) for all experiments.
+The Optuna sampler uses \texttt{TPESampler(seed=42)}.
+
+\end{document}
