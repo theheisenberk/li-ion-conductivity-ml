@@ -27,9 +27,10 @@
 \newcommand{\rhoS}{\rho_{\text{Spearman}}}
 
 \title{%
-  \textbf{Final Report: Machine-Learning Prediction of\\
-  Lithium-Ion Conductivity from Composition,\\
-  Structure, and Physics-Informed Features}
+  \textbf{Prediction of Lithium-Ion Conductivity in\\
+  Solid Electrolytes from Compositional, Structural,\\
+  and Physics-Informed Descriptors via\\
+  Histogram-Based Gradient Boosting}
 }
 \author{Berk Oguz}
 \date{February 2026}
@@ -37,9 +38,31 @@
 \graphicspath{{../results/results_stage1/}{../results/results_stage3_final/}}
 
 \begin{document}
-\maketitle
+
+% ---- Title page ----
+\begin{titlepage}
+  \centering
+  \vspace*{\stretch{1}}
+  {\LARGE\bfseries Prediction of Lithium-Ion Conductivity in\\[0.4em]
+   Solid Electrolytes from Compositional, Structural,\\[0.4em]
+   and Physics-Informed Descriptors via\\[0.4em]
+   Histogram-Based Gradient Boosting\par}
+  \vspace{2cm}
+  {\Large Berk Oguz\par}
+  \vspace{1.5cm}
+  {\large Research Module\par}
+  \vspace{0.5cm}
+  {\large Bavarian Center for Battery Technology (BayBatt)\par}
+  \vspace{0.3cm}
+  {\large University of Bayreuth\par}
+  \vspace{1.5cm}
+  {\large February 2026\par}
+  \vspace*{\stretch{2}}
+\end{titlepage}
+
+% ---- Table of contents ----
 \tableofcontents
-\clearpage
+\newpage
 
 %=============================================================================
 \section{Introduction and Motivation}
@@ -53,7 +76,7 @@ to $\logsigma$ could dramatically accelerate materials screening.
 The core use case is \textbf{materials ranking}: given a database of thousands
 of candidate compositions, the model should reliably distinguish promising
 high-conductivity materials from poor ones, so that only the top candidates
-proceed to expensive DFT calculations or synthesis.  For this reason,
+proceed to expensive density functional theory (DFT) calculations or synthesis.  For this reason,
 \textbf{Spearman's rank correlation} ($\rhoS$) is the primary evaluation
 metric throughout this project---it directly measures how well the model
 preserves the true conductivity ordering.
@@ -62,19 +85,37 @@ This project develops such a model in three progressive stages, each adding
 richer descriptors:
 
 \begin{enumerate}[leftmargin=*]
-  \item \textbf{Stage~0 (Composition-only):} elemental ratios, SMACT
+  \item \textbf{Stage~0 (Composition-only):} elemental ratios,
+        Semiconducting Materials from Analogy and Chemical Theory (SMACT)
         stoichiometry vectors, and Magpie element-embedding averages.
   \item \textbf{Stage~1 (+ Structural geometry):} lattice parameters, density,
-        Li-site environment metrics extracted from CIF files and CSV metadata.
+        Li-site environment metrics extracted from Crystallographic
+        Information File (CIF) files and CSV metadata.
   \item \textbf{Stage~2 (+ Physics-informed):} bond-valence mismatch, Ewald
-        site energy, and Voronoi coordination number computed with
+        site energy, and Voronoi coordination number (CN) computed with
         \texttt{pymatgen}.
 \end{enumerate}
 
 All models use \textbf{HistGradientBoostingRegressor} (scikit-learn) as the
 base learner.  Hyperparameters are optimised with \textbf{Optuna} (Bayesian
-TPE sampler, 50 trials) using 5-fold cross-validation with a
-\emph{generalization penalty} to suppress overfitting.
+Tree-structured Parzen Estimator (TPE) sampler, 50 trials) using 5-fold
+cross-validation (CV) with a \emph{generalization penalty} to suppress
+overfitting.
+
+\paragraph{Evaluation vs.\ optimisation metric.}
+Although $\rhoS$ is the primary \emph{evaluation} metric, the models are
+trained and tuned by minimising root mean square error (RMSE) on
+$\logsigma$.  This is a deliberate choice: gradient-boosted trees minimise a
+differentiable squared-error loss internally, whereas the Spearman
+correlation involves a rank transformation that is piecewise-constant and
+not directly amenable to gradient-based optimisation.  While differentiable
+Spearman approximations (e.g.\ LambdaRank-style pairwise losses) exist, they
+add substantial implementation complexity.  To keep the methodology
+lightweight and the scope focused, we rely on the empirical observation that
+reducing prediction error in log-space is a strong proxy for preserving the
+correct conductivity ordering---an assumption validated by the monotonically
+improving $\rhoS$ across all three stages (Section~\ref{sec:final}).  A
+more detailed discussion is provided in Section~\ref{sec:objective}.
 
 %=============================================================================
 \section{Dataset}
@@ -93,7 +134,7 @@ and provides:
 \end{itemize}
 
 \paragraph{Target transformation.}
-The target spans roughly 20~orders of magnitude ($10^{-30}$ to
+The target spans roughly 30~orders of magnitude ($10^{-30}$ to
 $10^{-1}$\,S\,cm$^{-1}$), so we model $\logsigma$.  Values originally
 reported as threshold strings (e.g.\ ``$<$1E-10'') are coerced to the
 threshold value and flagged by a binary indicator \texttt{sigma\_is\_coerced}
@@ -107,7 +148,7 @@ the model can learn to weight imprecise measurements differently.
 Column names are stripped of whitespace; infinite values are replaced with NaN;
 exact duplicate rows are dropped; rows missing the target are removed from
 training only.  The raw conductivity column and all non-feature metadata
-(identifiers, DOIs, reference fields) are placed in a mandatory exclusion list
+(identifiers, Digital Object Identifiers (DOIs), reference fields) are placed in a mandatory exclusion list
 to ensure they never enter the feature set.
 
 %=============================================================================
@@ -130,7 +171,8 @@ to ensure they never enter the feature set.
 
 \paragraph{Embedding selection.}
 Three element-embedding schemes were compared on top of the elemental-ratio
-and SMACT baseline (all with sklearn defaults, no Optuna):
+and SMACT baseline (all with sklearn defaults, no Optuna), reporting CV
+$\Rtwo$ and root mean square error (RMSE):
 
 \begin{center}
 \small
@@ -180,7 +222,7 @@ Magpie was therefore selected as the primary embedding for its \emph{compact
 dimensionality} (22-d), \emph{physical interpretability}, and its strong
 baseline performance that leaves the most room for improvement when structural
 and physics features are added.  After Optuna optimisation, the Magpie-based
-Stage~0 model achieves $\Rtwo_{\text{CV}} = 0.746$, confirming that the
+Stage~0 model achieves CV $\Rtwo = 0.746$, confirming that the
 choice did not sacrifice predictive power.
 
 \subsection{Stage~1: Structural Geometry Features (+23 features $\to$ 152)}
@@ -202,15 +244,15 @@ Four progressively richer feature sets were compared (all with sklearn
 defaults):
 
 \begin{center}
-\small
-\begin{tabular}{lrccc}
+\footnotesize
+\begin{tabular}{lp{5.5cm}rcc}
   \toprule
-  Experiment & \#Feat. & CV $\Rtwo$ & CV RMSE \\
+  Experiment & Features included & \#Feat. & CV $\Rtwo$ & CV RMSE \\
   \midrule
-  \texttt{stage0\_magpie}      & 129 & 0.7393 & 1.3675 \\
-  \texttt{stage1\_basic\_struct}  & 133 & 0.7369 & 1.3737 \\
-  \texttt{stage1\_geometry}    & 152 & 0.7369 & 1.3737 \\
-  \texttt{stage1\_full\_struct}   & 382 & 0.7370 & 1.3734 \\
+  \texttt{stage0\_magpie}         & Baseline (composition only)                                                                       & 129 & 0.7393 & 1.3675 \\
+  \texttt{stage1\_basic\_struct}  & + density, volume/atom, $Z$, space-group number                                                   & 133 & 0.7369 & 1.3737 \\
+  \texttt{stage1\_geometry}       & + lattice parameters ($a,b,c,\alpha,\beta,\gamma$), CIF-derived Li-site metrics, anisotropy ratios & 152 & 0.7369 & 1.3737 \\
+  \texttt{stage1\_full\_struct}   & + 230 space-group one-hot columns                                                                 & 382 & 0.7370 & 1.3734 \\
   \bottomrule
 \end{tabular}
 \end{center}
@@ -387,7 +429,7 @@ This choice is pragmatic:
 
 A future iteration of this project could implement a direct $\rhoS$
 maximiser (e.g.\ via LambdaRank-style pairwise losses or a custom Optuna
-objective that evaluates $\rhoS$ on OOF predictions).  Within the time
+objective that evaluates $\rhoS$ on out-of-fold (OOF) predictions).  Within the time
 constraints of this project, RMSE minimisation proved to be a reliable proxy
 that yielded monotonically improving $\rhoS$ across all three stages.
 
@@ -413,7 +455,7 @@ superior performance:
   \midrule
   baseline\_default       & .737 & .890 & .591 & .701 \\
   baseline\_default\_geom & .737 & .887 & .556 & .711 \\
-  physics (w/ SG one-hot) & .740 & .886 & .598 & .706 \\
+  physics (w/ space-group one-hot) & .740 & .886 & .598 & .706 \\
   \textbf{physics\_geometry} & \textbf{.752} & \textbf{.890} & \textbf{.609} & \textbf{.748} \\
   \bottomrule
 \end{tabular}
@@ -509,7 +551,7 @@ screening application.
 \section{Visualisations}
 %=============================================================================
 
-\subsection{Side-by-Side Parity Plots (Triptych)}
+\subsection{Three-Panel Parity Plots}
 
 \begin{figure}[H]
   \centering
@@ -524,9 +566,10 @@ screening application.
     \includegraphics[width=\textwidth]{final_triptych_test.png}
     \caption{Held-out test set.}
   \end{subfigure}
-  \caption{Triptych parity plots for the three stages.  Each panel shares
-  identical axis limits for direct visual comparison.  The diagonal dashed line
-  represents perfect prediction.}
+  \caption{Three-panel parity plots for the three stages (one panel per
+  stage, arranged as a triptych for direct visual comparison).  Each panel
+  shares identical axis limits.  The diagonal dashed line represents perfect
+  prediction.}
   \label{fig:triptych}
 \end{figure}
 
