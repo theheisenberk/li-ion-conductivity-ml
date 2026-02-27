@@ -864,9 +864,13 @@ much more dramatic improvements in ranking quality.
         kinetic effects beyond static structure.
   \item \textbf{Ensemble methods}: combining the three stage-specific models
         (e.g.\ stacking) could exploit their complementary strengths.
-  \item \textbf{Uncertainty quantification}: quantile regression models
-        (explored in Stage~2) provide prediction intervals that are valuable
-        for materials screening under uncertainty.
+  \item \textbf{Ranking uncertainty quantification}: quantile regression
+        models were explored during development to produce pointwise
+        prediction intervals, but were ultimately excluded from this
+        report---the ranking-focused objective (Spearman~$\rhoS$) is not
+        naturally expressed through pointwise confidence bands.  Future work
+        could instead quantify ranking uncertainty via bootstrap resampling
+        of~$\rhoS$ or pairwise rank-inversion probabilities.
 \end{itemize}
 
 %=============================================================================
