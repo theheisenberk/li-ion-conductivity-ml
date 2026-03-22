@@ -28,8 +28,9 @@ desktop.ini
 # Data — included in the repo (small dataset, ~600 entries)
 # data/
 
-# Archive (optional: include or exclude)
-# archive/
+archive/
+tests/
+
 
 # PDFs in root (reference papers, not project output)
 /*.pdf
