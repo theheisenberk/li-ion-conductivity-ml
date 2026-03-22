@@ -1,6 +1,6 @@
 # Interim Report: Stage 2 - Physics-Informed Features (Optuna Pipeline)
 
-**Date:** 2026-02-12
+**Date:** 2026-03-22
 
 ## 1. Goal of Stage 2
 
@@ -110,7 +110,7 @@ to find models potentially simpler than defaults.
 | stage2_double_model_residual_geometry | **stage2_baseline_default_geometry** (no Optuna) | Optuna-optimized residual model (relative to geometry baseline) |
 | stage2_double_model_residual_stack | **stage2_baseline_default** (no Optuna) | Optuna-optimized meta-model |
 
-**The DEFAULT model is used as Model 1 in all double-model strategies except Strategy E** — not the simple model. Among experiments, **stage2_physics** (Test R² 0.5982) and **stage2_double_model_residual** (Test R² 0.5963) achieve the best test set performance.
+**The DEFAULT model is used as Model 1 in all double-model strategies except Strategy E** — not the simple model. Among experiments, stage2_double_model_residual often achieves the best test set performance.
 
 ## 5. Cross-Validation Results (Train OOF)
 
@@ -120,6 +120,8 @@ to find models potentially simpler than defaults.
 | stage2_baseline_default_geometry | 0.7369 | 1.3737 | 0.8229 | 0.8873 |
 | stage2_baseline_simple | 0.7295 | 1.3929 | 0.8851 | 0.8748 |
 | stage2_physics | 0.7404 | 1.3646 | 0.8826 | 0.8856 |
+| stage2_physics_geometry | 0.7517 | 1.3344 | 0.8567 | 0.8900 |
+| stage1_geometry_optuna | 0.7257 | 1.4026 | 0.8863 | 0.8799 |
 | stage2_double_model_fulltrain | 0.7418 | 1.3608 | 0.8384 | 0.8922 |
 | stage2_double_model_subsettrain | 0.7237 | 1.4078 | 0.8506 | 0.8852 |
 | stage2_double_model_residual | 0.7334 | 1.3828 | 0.8304 | 0.8893 |
@@ -134,6 +136,8 @@ to find models potentially simpler than defaults.
 | stage2_baseline_default_geometry | 0.5557 | 1.6907 | 1.1274 | 0.7114 |
 | stage2_baseline_simple | 0.5666 | 1.6699 | 1.1790 | 0.6651 |
 | stage2_physics | 0.5982 | 1.6078 | 1.1654 | 0.7055 |
+| stage2_physics_geometry | 0.6085 | 1.5872 | 1.1411 | 0.7479 |
+| stage1_geometry_optuna | 0.5497 | 1.7022 | 1.2088 | 0.6443 |
 | stage2_double_model_fulltrain | 0.5619 | 1.6789 | 1.1028 | 0.7097 |
 | stage2_double_model_subsettrain | 0.5262 | 1.7459 | 1.1295 | 0.6889 |
 | stage2_double_model_residual | 0.5963 | 1.6116 | 1.0918 | 0.6991 |
@@ -148,29 +152,12 @@ Stage 2 analysis showed that optimizing on full CV splits led to overfitting: CV
 1. **5-fold CV with generalization penalty**: Optuna optimizes using predefined 5-fold splits.
    For each fold, the objective is: val_metric + 0.2 * max(0, val_metric - train_metric).
    This penalizes large train-val gaps and favors hyperparameters that generalize.
-   *Previously used 80/20 hold-out; switching to CV+penalty (applied in every fold) yields more
-   robust validation and improves test performance for several models (see Section 7.1).*
 2. **Conservative search space**: Tighter bounds favor simpler models.
 3. **Baseline experiments**:
    - `stage2_baseline_default`: sklearn defaults (no Optuna) — documents default, often best generalizer.
    - `stage2_baseline_default_geometry`: geometry-only baseline (Stage 0 + geometry, no space group one-hot), sklearn defaults (no Optuna).
    - `stage2_baseline_simple`: Optuna with SIMPLE_SEARCH_SPACE — searches for even simpler models.
 
-### 7.1 Impact of CV+Penalty on Test Performance (vs. Previous 80/20 Hold-Out)
-
-Switching from 80/20 hold-out to 5-fold CV with per-fold generalization penalty changed test R² as follows:
-
-| Experiment | Previous (hold-out) | Current (CV+penalty) | Δ R² |
-|------------|---------------------|----------------------|------|
-| stage2_baseline_simple | 0.5684 | 0.5666 | −0.0018 |
-| stage2_physics | 0.5675 | **0.5982** | **+0.0307** |
-| stage2_double_model_fulltrain | 0.5335 | 0.5619 | +0.0284 |
-| stage2_double_model_subsettrain | 0.5711 | 0.5262 | −0.0449 |
-| stage2_double_model_residual | 0.5963 | 0.5963 | 0.0000 |
-| stage2_double_model_residual_geometry | 0.5592 | 0.5592 | 0.0000 |
-| stage2_double_model_residual_stack | 0.5434 | 0.5438 | +0.0004 |
-
-**Summary:** `stage2_physics` and `stage2_double_model_fulltrain` gain substantially (≈3 pp and ≈2.8 pp R²). `stage2_double_model_residual` remains the best overall (0.5963) and is unchanged. `stage2_double_model_subsettrain` drops, likely due to the small physics subset favouring simpler validation. The baseline (`stage2_baseline_default`, no Optuna) is unchanged at 0.5912.
 
 ## 8. Best Hyperparameters
 
@@ -205,6 +192,30 @@ sklearn default HistGradientBoostingRegressor (no tuning)
 | l2_regularization | 0.003009815839845394 |
 | max_bins | 95 |
 | max_iter | 91 |
+
+### stage2_physics_geometry
+
+| Hyperparameter | Value |
+|----------------|-------|
+| max_depth | 6 |
+| learning_rate | 0.02604297933348663 |
+| max_leaf_nodes | 81 |
+| min_samples_leaf | 5 |
+| l2_regularization | 0.07942148861284407 |
+| max_bins | 86 |
+| max_iter | 114 |
+
+### stage1_geometry_optuna
+
+| Hyperparameter | Value |
+|----------------|-------|
+| max_depth | 5 |
+| learning_rate | 0.040379900195114025 |
+| max_leaf_nodes | 89 |
+| min_samples_leaf | 15 |
+| l2_regularization | 0.0008930624573218125 |
+| max_bins | 64 |
+| max_iter | 76 |
 
 ### stage2_double_model_subsettrain
 
@@ -257,11 +268,11 @@ sklearn default HistGradientBoostingRegressor (no tuning)
 
 ## 9. Comparison with Stage 1 (stage1_full_struct)
 
-| Metric | Stage 1 | stage2_baseline_default | stage2_baseline_default_geometry | stage2_baseline_simple | stage2_physics | stage2_double_model_fulltrain | stage2_double_model_subsettrain | stage2_double_model_residual | stage2_double_model_residual_geometry | stage2_double_model_residual_stack | 
-|--------|---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|
-| R2 | 0.7370 | 0.7370 (+0.0000) | 0.7369 (-0.0001) | 0.7295 (-0.0075) | 0.7404 (+0.0034) | 0.7418 (+0.0048) | 0.7237 (-0.0133) | 0.7334 (-0.0036) | 0.7336 (-0.0034) | 0.7324 (-0.0046) | 
-| RMSE | 1.3734 | 1.3734 (-0.0000) | 1.3737 (+0.0003) | 1.3929 (+0.0195) | 1.3646 (-0.0088) | 1.3608 (-0.0126) | 1.4078 (+0.0344) | 1.3828 (+0.0094) | 1.3824 (+0.0090) | 1.3854 (+0.0120) | 
-| MAE | 0.8253 | 0.8253 (-0.0000) | 0.8229 (-0.0024) | 0.8851 (+0.0598) | 0.8826 (+0.0573) | 0.8384 (+0.0131) | 0.8506 (+0.0253) | 0.8304 (+0.0051) | 0.8284 (+0.0031) | 0.8488 (+0.0235) | 
+| Metric | Stage 1 | stage2_baseline_default | stage2_baseline_default_geometry | stage2_baseline_simple | stage2_physics | stage2_physics_geometry | stage1_geometry_optuna | stage2_double_model_fulltrain | stage2_double_model_subsettrain | stage2_double_model_residual | stage2_double_model_residual_geometry | stage2_double_model_residual_stack | 
+|--------|---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|---------|
+| R2 | 0.7370 | 0.7370 (+0.0000) | 0.7369 (-0.0001) | 0.7295 (-0.0075) | 0.7404 (+0.0034) | 0.7517 (+0.0147) | 0.7257 (-0.0113) | 0.7418 (+0.0048) | 0.7237 (-0.0133) | 0.7334 (-0.0036) | 0.7336 (-0.0034) | 0.7324 (-0.0046) | 
+| RMSE | 1.3734 | 1.3734 (-0.0000) | 1.3737 (+0.0003) | 1.3929 (+0.0195) | 1.3646 (-0.0088) | 1.3344 (-0.0390) | 1.4026 (+0.0292) | 1.3608 (-0.0126) | 1.4078 (+0.0344) | 1.3828 (+0.0094) | 1.3824 (+0.0090) | 1.3854 (+0.0120) | 
+| MAE | 0.8253 | 0.8253 (-0.0000) | 0.8229 (-0.0024) | 0.8851 (+0.0598) | 0.8826 (+0.0573) | 0.8567 (+0.0314) | 0.8863 (+0.0610) | 0.8384 (+0.0131) | 0.8506 (+0.0253) | 0.8304 (+0.0051) | 0.8284 (+0.0031) | 0.8488 (+0.0235) | 
 
 ## 10. Feature Coverage and Gating
 
@@ -298,8 +309,7 @@ baseline trained on the full dataset.
   strategies help avoid overfitting to this small subset while retaining their value where reliable.
 - **Optuna optimization (where used):** `stage2_baseline_simple`, `stage2_physics`, and all
   double-model Model 2 variants use Optuna with 5-fold CV and generalization penalty. `stage2_baseline_default`
-  uses **no Optuna** (sklearn defaults). Best test performers: `stage2_physics` (0.5982) and
-  `stage2_double_model_residual` (0.5963); the CV+penalty change improved physics-only models.
+  uses **no Optuna** (sklearn defaults). Best test performer is often `stage2_double_model_residual`.
 - **Quantile regression for uncertainty:** The best-performing experiment was used to train
   quantile regression models (Q0.05, Q0.5, Q0.95) to generate 90% prediction intervals.
   This provides uncertainty quantification alongside point predictions.
@@ -321,7 +331,7 @@ The quantile models allow us to:
 
 ## 13. Artifacts
 
-Results are saved to `results/results_optuna/`:
+Results are saved to `results/results_stage2/`:
 - `stage2_*_optuna_cv_parity.png` — 5-fold CV parity plots for each experiment (including all double-model variants)
 - `stage2_*_optuna_test_parity.png` — Test set parity plots
 - `stage2_*_optuna_predictions.csv` — Test set predictions for each experiment

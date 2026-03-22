@@ -1,6 +1,6 @@
 # Interim Report: Stage 1 - Structural Features
 
-**Date:** 2026-02-16
+**Date:** 2026-03-22
 
 ## 1. Goal of Stage 1
 

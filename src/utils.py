@@ -155,6 +155,42 @@ def compute_regression_metrics(y_true: np.ndarray, y_pred: np.ndarray) -> Dict[s
 	return {"mae": mae, "rmse": rmse, "r2": r2}
 
 
+def compute_spearman_rho(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+	"""
+	Computes Spearman rank correlation (rho) between true and predicted values.
+
+	This implementation avoids a hard dependency on scipy by using rank transformation
+	followed by Pearson correlation on ranks.
+
+	Args:
+		y_true (np.ndarray): Ground truth values.
+		y_pred (np.ndarray): Predicted values.
+
+	Returns:
+		float: Spearman rho, or NaN when undefined.
+	"""
+	y_true = np.asarray(y_true, dtype=float)
+	y_pred = np.asarray(y_pred, dtype=float)
+	mask = np.isfinite(y_true) & np.isfinite(y_pred)
+	y_true = y_true[mask]
+	y_pred = y_pred[mask]
+
+	if len(y_true) < 2:
+		return np.nan
+
+	# Rank with average method to handle ties robustly.
+	ranks_true = pd.Series(y_true).rank(method="average").to_numpy(dtype=float)
+	ranks_pred = pd.Series(y_pred).rank(method="average").to_numpy(dtype=float)
+
+	std_true = np.std(ranks_true)
+	std_pred = np.std(ranks_pred)
+	if std_true == 0 or std_pred == 0:
+		return np.nan
+
+	rho = np.corrcoef(ranks_true, ranks_pred)[0, 1]
+	return float(rho)
+
+
 def compute_r2_linear_from_log(
 	y_true_log: np.ndarray,
 	y_pred_log: np.ndarray,
@@ -382,6 +418,8 @@ def save_parity_plot(
 						text_lines.append(f"$R^2_{{linear}} = {r2_lin:.3f}$")
 			except Exception:
 				pass
+		if spearman_rho is None:
+			spearman_rho = compute_spearman_rho(y_true, y_pred)
 		if spearman_rho is not None and np.isfinite(spearman_rho):
 			text_lines.append(r"$\rho = {:.3f}$".format(spearman_rho))
 
@@ -706,17 +744,16 @@ for evaluation.
 ## 8. Plots and Metrics (How to Read Them)
 
 - **5-fold CV parity plots**: use OOF predictions on training data.
-  - Plots report **R-square (log)** and **R-square_linear** from back-transformed predictions.
+	- Plots report **R-square** and **Spearman rho**.
 - **Test parity plots**: use predictions on the test set (if targets are present).
-  - Same R-square annotations as above for log-target experiments.
+	- Same R-square and Spearman rho annotations as above.
 - The **metrics summary table** consolidates both log-space and linear-space metrics
   across all experiments in `results/results_stage0/stage0_metrics_summary.csv`.
 
 ## 9. Artifacts
 
 - Parity plots for each log-scale embedding experiment are saved in `results/results_stage0/`.
-  These plots include both R-square (log) and R-square_linear computed after back-transforming
-  predictions with sigma_hat = 10^pred.
+	These plots include both R-square and Spearman rho annotations.
 - A parity plot and predictions are also saved for the **Magpie-only linear sigma** run.
 - Prediction CSVs for the test set are saved alongside the plots.
 - Both log-scale and linear-scale histograms are saved in the same directory.

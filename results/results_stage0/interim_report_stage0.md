@@ -1,6 +1,6 @@
 # Interim Report: Stage 0 - Composition-Only Baseline
 
-**Date:** 2026-02-16
+**Date:** 2026-03-22
 
 ## 1. Goal of Stage 0
 
@@ -120,17 +120,16 @@ for evaluation.
 ## 8. Plots and Metrics (How to Read Them)
 
 - **5-fold CV parity plots**: use OOF predictions on training data.
-  - Plots report **R-square (log)** and **R-square_linear** from back-transformed predictions.
+	- Plots report **R-square** and **Spearman rho**.
 - **Test parity plots**: use predictions on the test set (if targets are present).
-  - Same R-square annotations as above for log-target experiments.
+	- Same R-square and Spearman rho annotations as above.
 - The **metrics summary table** consolidates both log-space and linear-space metrics
   across all experiments in `results/results_stage0/stage0_metrics_summary.csv`.
 
 ## 9. Artifacts
 
 - Parity plots for each log-scale embedding experiment are saved in `results/results_stage0/`.
-  These plots include both R-square (log) and R-square_linear computed after back-transforming
-  predictions with sigma_hat = 10^pred.
+	These plots include both R-square and Spearman rho annotations.
 - A parity plot and predictions are also saved for the **Magpie-only linear sigma** run.
 - Prediction CSVs for the test set are saved alongside the plots.
 - Both log-scale and linear-scale histograms are saved in the same directory.

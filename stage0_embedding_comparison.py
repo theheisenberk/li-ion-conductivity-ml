@@ -90,6 +90,7 @@ from src.utils import (
 	save_histogram,
 	generate_stage0_report,
 	compute_regression_metrics,
+	compute_spearman_rho,
 )
 
 # Import functions related to data handling: loading, cleaning, target transformation, and splitting.
@@ -265,8 +266,12 @@ def main():
 		fold_scores, overall_metrics, oof = run_cv_with_predefined_splits(X, y, splits, config)
 
 		# Log the final metrics for this specific experiment.
+		spearman_cv = compute_spearman_rho(y.values, oof)
 		logger.info(f"[{name}] Cross-validation complete. Fold RMSEs: {[f'{s:.4f}' for s in fold_scores]}")
-		logger.info(f"[{name}] Overall CV Metrics -> R²: {overall_metrics['r2']:.4f} | RMSE: {overall_metrics['rmse']:.4f} | MAE: {overall_metrics['mae']:.4f}")
+		logger.info(
+			f"[{name}] Overall CV Metrics -> R²: {overall_metrics['r2']:.4f} | "
+			f"Spearman: {spearman_cv:.4f} | RMSE: {overall_metrics['rmse']:.4f} | MAE: {overall_metrics['mae']:.4f}"
+		)
 
 		# Store the metrics for the report.
 		all_experiment_metrics[name] = overall_metrics
@@ -289,6 +294,7 @@ def main():
 			"experiment": name,
 			"target_scale": "log10_sigma",
 			"r2": overall_metrics["r2"],
+			"spearman": spearman_cv,
 			"rmse": overall_metrics["rmse"],
 			"mae": overall_metrics["mae"],
 			"r2_linear": r2_linear,
@@ -303,7 +309,7 @@ def main():
 			oof,
 			parity_plot_path,
 			title=f"Stage 0 5-Fold CV Performance ({name})",
-			r2_linear_from_log=True,
+			spearman_rho=spearman_cv,
 		)
 		
 		# ---------------------------------------------------------------------------------------------
@@ -327,6 +333,12 @@ def main():
 		# Test-set parity plot (log target, back-transformed R² shown)
 		if TARGET_COL in test_df.columns:
 			test_y = test_df[TARGET_COL].values
+			test_metrics = compute_regression_metrics(test_y, preds)
+			test_spearman = compute_spearman_rho(test_y, preds)
+			logger.info(
+				f"[{name}] Test Metrics -> R²: {test_metrics['r2']:.4f} | "
+				f"Spearman: {test_spearman:.4f} | RMSE: {test_metrics['rmse']:.4f} | MAE: {test_metrics['mae']:.4f}"
+			)
 			test_parity_path = os.path.join(
 				PROJECT_ROOT, "results", "results_stage0", f"stage0_test_parity_{name}.png"
 			)
@@ -335,8 +347,7 @@ def main():
 				preds,
 				test_parity_path,
 				title=f"Stage 0 Test Performance ({name})",
-				# Keep linearized R² consistent with CV: compute R² on 10**(log10_sigma) vs 10**(log10_sigma_pred).
-				r2_linear_from_log=True,
+				spearman_rho=test_spearman,
 			)
 
 	# ---------------------------------------------------------------------------------------------
@@ -379,15 +390,18 @@ def main():
 	)
 	# Predictions are already clamped to be non-negative by the model wrapper
 	overall_metrics_linear = compute_regression_metrics(y_linear.values, oof_linear)
+	spearman_linear_cv = compute_spearman_rho(y_linear.values, oof_linear)
 	logger.info(f"[magpie_only_linear_sigma] Cross-validation complete. Fold RMSEs: {[f'{s:.4f}' for s in fold_scores_linear]}")
 	logger.info(
 		f"[magpie_only_linear_sigma] Overall CV Metrics -> R²: {overall_metrics_linear['r2']:.4f} | "
+		f"Spearman: {spearman_linear_cv:.4f} | "
 		f"RMSE: {overall_metrics_linear['rmse']:.4f} | MAE: {overall_metrics_linear['mae']:.4f}"
 	)
 	metrics_rows.append({
 		"experiment": "magpie_only_linear_sigma",
 		"target_scale": "linear_sigma",
 		"r2": np.nan,
+		"spearman": spearman_linear_cv,
 		"rmse": np.nan,
 		"mae": np.nan,
 		"r2_linear": overall_metrics_linear["r2"],
@@ -405,6 +419,7 @@ def main():
 		title="Stage 0 5-Fold CV Performance (magpie only, linear σ)",
 		x_label=r"Actual $\sigma$ (S cm$^{-1}$)",
 		y_label=r"Predicted $\sigma$ (S cm$^{-1}$)",
+		spearman_rho=spearman_linear_cv,
 	)
 
 	X_test_linear = test_df_linear[[c for c in emb_cols_linear if c in test_df_linear.columns]]
@@ -420,6 +435,13 @@ def main():
 	# Test-set parity plot for linear sigma
 	if sigma_col in test_df.columns:
 		test_sigma = coerce_sigma_series(test_df[sigma_col]).values
+		test_metrics_linear = compute_regression_metrics(test_sigma, preds_linear)
+		test_spearman_linear = compute_spearman_rho(test_sigma, preds_linear)
+		logger.info(
+			f"[magpie_only_linear_sigma] Test Metrics -> R²: {test_metrics_linear['r2']:.4f} | "
+			f"Spearman: {test_spearman_linear:.4f} | "
+			f"RMSE: {test_metrics_linear['rmse']:.4f} | MAE: {test_metrics_linear['mae']:.4f}"
+		)
 		test_parity_linear_path = os.path.join(
 			PROJECT_ROOT, "results", "results_stage0", "stage0_test_parity_magpie_only_linear_sigma.png"
 		)
@@ -430,6 +452,7 @@ def main():
 			title="Stage 0 Test Performance (magpie only, linear σ)",
 			x_label=r"Actual $\sigma$ (S cm$^{-1}$)",
 			y_label=r"Predicted $\sigma$ (S cm$^{-1}$)",
+			spearman_rho=test_spearman_linear,
 		)
 
 	# ---------------------------------------------------------------------------------------------

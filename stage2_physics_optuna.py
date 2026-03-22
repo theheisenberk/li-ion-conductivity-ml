@@ -1438,6 +1438,7 @@ def main():
             parity_plot_path,
             title=f"Stage 2 5-Fold CV (Optuna): {exp_name}",
             r2_linear_from_log=False,
+            spearman_rho=rho_train,
         )
         logger.info(f"[{exp_name}] CV parity plot saved to: {parity_plot_path}")
         
@@ -1468,6 +1469,7 @@ def main():
                 test_parity_path,
                 title=f"Stage 2 Test (Optuna): {exp_name}",
                 r2_linear_from_log=False,
+                spearman_rho=spearman_rho(test_y, preds),
             )
             
             # Log test-set metrics analogous to CV metrics
@@ -1555,6 +1557,7 @@ def main():
                     fulltrain_parity_path,
                     title="Stage 2 5-Fold CV (Optuna): double-model fulltrain (baseline + physics)",
                     r2_linear_from_log=False,
+                    spearman_rho=fulltrain_rho,
                 )
                 logger.info(f"stage2_double_model_fulltrain CV parity plot saved to: {fulltrain_parity_path}")
                 
@@ -1573,6 +1576,7 @@ def main():
                         fulltrain_test_parity_path,
                         title="Stage 2 Test (Optuna): double-model fulltrain (baseline + physics)",
                         r2_linear_from_log=False,
+                        spearman_rho=spearman_rho(test_y, test_preds_fulltrain),
                     )
                     
                     fulltrain_test_metrics = compute_regression_metrics(test_y, test_preds_fulltrain)
@@ -1673,6 +1677,7 @@ def main():
                         subsettrain_parity_path,
                         title="Stage 2 5-Fold CV (Optuna): double-model subsettrain (baseline + physics subset)",
                         r2_linear_from_log=False,
+                        spearman_rho=subsettrain_rho,
                     )
                     logger.info(f"stage2_double_model_subsettrain CV parity plot saved to: {subsettrain_parity_path}")
                     
@@ -1706,6 +1711,7 @@ def main():
                                 subsettrain_test_parity_path,
                                 title="Stage 2 Test (Optuna): double-model subsettrain (baseline + physics subset)",
                                 r2_linear_from_log=False,
+                                spearman_rho=spearman_rho(test_y, test_preds_subsettrain),
                             )
                             
                             subsettrain_test_metrics = compute_regression_metrics(test_y, test_preds_subsettrain)
@@ -1799,6 +1805,7 @@ def main():
                         residual_parity_path,
                         title="Stage 2 5-Fold CV (Optuna): double-model residual (baseline + physics residual)",
                         r2_linear_from_log=False,
+                        spearman_rho=residual_rho,
                     )
                     logger.info(f"stage2_double_model_residual CV parity plot saved to: {residual_parity_path}")
                     
@@ -1835,6 +1842,7 @@ def main():
                                 residual_test_parity_path,
                                 title="Stage 2 Test (Optuna): double-model residual (baseline + physics residual)",
                                 r2_linear_from_log=False,
+                                spearman_rho=spearman_rho(test_y, test_preds_residual),
                             )
                             
                             residual_test_metrics = compute_regression_metrics(test_y, test_preds_residual)
@@ -1960,6 +1968,7 @@ def main():
                                 "double-model residual_geometry (geometry baseline + physics residual)"
                             ),
                             r2_linear_from_log=False,
+                            spearman_rho=residual_geom_rho,
                         )
                         logger.info(
                             f"stage2_double_model_residual_geometry CV parity plot saved to: {residual_geom_parity_path}"
@@ -2011,6 +2020,7 @@ def main():
                                         "double-model residual_geometry (geometry baseline + physics residual)"
                                     ),
                                     r2_linear_from_log=False,
+                                    spearman_rho=spearman_rho(test_y, test_preds_residual_geom),
                                 )
                                 
                                 residual_geom_test_metrics = compute_regression_metrics(
@@ -2119,6 +2129,7 @@ def main():
                         residual_stack_parity_path,
                         title="Stage 2 5-Fold CV (Optuna): double-model residual_stack (baseline + learned combiner)",
                         r2_linear_from_log=False,
+                        spearman_rho=residual_stack_rho,
                     )
                     logger.info(f"stage2_double_model_residual_stack CV parity plot saved to: {residual_stack_parity_path}")
                     
@@ -2161,6 +2172,7 @@ def main():
                                 residual_stack_test_parity_path,
                                 title="Stage 2 Test (Optuna): double-model residual_stack (baseline + learned combiner)",
                                 r2_linear_from_log=False,
+                                spearman_rho=spearman_rho(test_y, test_preds_residual_stack),
                             )
                             
                             residual_stack_test_metrics = compute_regression_metrics(test_y, test_preds_residual_stack)
@@ -2447,6 +2459,7 @@ def run_stage0_magpie_optuna():
         parity_plot_path,
         title=f"Stage 0 5-Fold CV (Optuna): {exp_name}",
         r2_linear_from_log=False,
+        spearman_rho=rho_train,
     )
     logger.info(f"[{exp_name}] CV parity plot saved to: {parity_plot_path}")
 
@@ -2479,6 +2492,7 @@ def run_stage0_magpie_optuna():
             test_parity_path,
             title=f"Stage 0 Test (Optuna): {exp_name}",
             r2_linear_from_log=False,
+            spearman_rho=spearman_rho(test_y, preds),
         )
 
         test_metrics = compute_regression_metrics(test_y, preds)

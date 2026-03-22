@@ -171,25 +171,31 @@ to ensure they never enter the feature set.
 
 \paragraph{Embedding selection.}
 Three element-embedding schemes were compared on top of the elemental-ratio
-and SMACT baseline (all with sklearn defaults, no Optuna), reporting CV
-$\Rtwo$ and root mean square error (RMSE):
+and SMACT baseline (all with sklearn defaults, no Optuna).  Table values now
+report both cross-validation and held-out test performance for ranking and
+explained variance:
 
 \begin{center}
 \small
-\begin{tabular}{lccc}
+\begin{tabular}{lcc|cc}
   \toprule
-  Embedding & CV $\Rtwo$ & CV RMSE \\
+        & \multicolumn{2}{c|}{\textbf{Cross-Validation}} & \multicolumn{2}{c}{\textbf{Test Set}} \\
+        Embedding & $\Rtwo$ & $\rhoS$ & $\Rtwo$ & $\rhoS$ \\
   \midrule
-  Mat2Vec (200-d)  & 0.713 & 1.434 \\
-  Magpie (22-d)    & 0.694 & 1.482 \\
-  MegNet16 (16-d)  & 0.659 & 1.565 \\
-  All combined     & 0.700 & 1.466 \\
+      Mat2Vec (200-d)  & .713 & .876 & .265 & .622 \\
+      Magpie (22-d)    & .694 & .856 & .398 & .656 \\
+      MegNet16 (16-d)  & .659 & .861 & .390 & .644 \\
+      All combined     & .700 & .872 & .145 & .589 \\
   \bottomrule
 \end{tabular}
 \end{center}
 
-While Mat2Vec achieves the highest CV $\Rtwo$, the choice of Magpie was
-deliberate and grounded in the nature of the embeddings:
+While Mat2Vec has the highest CV $\Rtwo$, Magpie gives the strongest held-out
+test ranking quality among the compact embeddings (test $\rhoS = 0.656$),
+which supports its use as the Stage~0 representative descriptor.
+
+The choice of Magpie was deliberate and grounded in the nature of the
+embeddings:
 
 \begin{itemize}[leftmargin=*]
   \item \textbf{Magpie} encodes \emph{tabulated physicochemical properties}
@@ -245,32 +251,39 @@ defaults):
 
 \begin{center}
 \footnotesize
-\begin{tabular}{lp{5.5cm}rcc}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lp{5cm}rcc|cc}
   \toprule
-  Experiment & Features included & \#Feat. & CV $\Rtwo$ & CV RMSE \\
+        & & & \multicolumn{2}{c|}{\textbf{Cross-Validation}} & \multicolumn{2}{c}{\textbf{Test Set}} \\
+        Experiment & Features included & \#Feat. & $\Rtwo$ & $\rhoS$ & $\Rtwo$ & $\rhoS$ \\
   \midrule
-  \texttt{stage0\_magpie}         & Baseline (composition only)                                                                       & 129 & 0.7393 & 1.3675 \\
-  \texttt{stage1\_basic\_struct}  & + density, volume/atom, $Z$, space-group number                                                   & 133 & 0.7369 & 1.3737 \\
-  \texttt{stage1\_geometry}       & + lattice parameters ($a,b,c,\alpha,\beta,\gamma$), CIF-derived Li-site metrics, anisotropy ratios & 152 & 0.7369 & 1.3737 \\
-  \texttt{stage1\_full\_struct}   & + 230 space-group one-hot columns                                                                 & 382 & 0.7370 & 1.3734 \\
+      \texttt{stage0\_magpie}         & Baseline (composition only)                                                                       & 129 & .739 & .872 & .458 & .691 \\
+      \texttt{stage1\_basic\_struct}  & + density, volume/atom, $Z$, space-group number                                                   & 133 & .737 & .880 & .468 & .716 \\
+      \texttt{stage1\_geometry}       & + lattice parameters ($a,b,c,\alpha,\beta,\gamma$), CIF-derived Li-site metrics, anisotropy ratios & 152 & .737 & .887 & .556 & .711 \\
+      \texttt{stage1\_full\_struct}   & + 230 space-group one-hot columns                                                                 & 382 & .737 & .890 & .591 & .701 \\
   \bottomrule
 \end{tabular}
+\setlength{\tabcolsep}{6pt}
 \end{center}
 
-The CV $\Rtwo$ values are nearly identical across all four variants.
-Adding full geometry features does not shift the overall explained variance
-but reduces the magnitude of the largest errors (lower RMSE tail).
+The CV $\Rtwo$ values are nearly identical across all four variants, while
+ranking quality (CV $\rhoS$) improves progressively with richer structural
+features. On the test set, richer structure improves $\Rtwo$, but the best
+test ranking metric in this block is achieved by \texttt{stage1\_basic\_struct}
+(test $\rhoS = 0.7157$), with \texttt{stage1\_geometry} very close
+($\rhoS = 0.7114$).
 
 \paragraph{Decision to exclude space-group one-hot encoding.}
 Adding the 230 space-group one-hot columns (\texttt{stage1\_full\_struct},
-382~features) does \emph{not} improve any metric over the geometry-only
-baseline (152~features).  This is unsurprising: the lattice parameters
+382~features) increases test $\Rtwo$ but does \emph{not} improve held-out
+ranking quality versus geometry-only features (test $\rhoS$: 0.7008 vs 0.7114).
+This is unsurprising: the lattice parameters
 ($a, b, c, \alpha, \beta, \gamma$) and derived quantities (anisotropy,
 orthogonality deviation, \texttt{is\_cubic\_like}) already encode the
 essential crystallographic symmetry information that space groups represent.
 One-hot encoding 230 categories for only 478 training samples risks severe
 overfitting---most columns are nearly all-zero---while providing no
-additional predictive signal beyond what the continuous lattice descriptors
+additional robust ranking signal beyond what the continuous lattice descriptors
 already capture.  All subsequent stages therefore build on the
 \textbf{geometry-only} feature set (152~features, no space-group one-hot).
 
@@ -296,8 +309,8 @@ distance (0.012) also contribute meaningfully.
 
 Based on this analysis, the \textbf{geometry-only baseline}
 (\texttt{stage1\_geometry}) was selected for the Stage~1 representative model.
-It uses sklearn default hyperparameters, which proved to be the best
-generaliser on the test set.
+It uses sklearn default hyperparameters and provides the best balance of
+predictive strength, descriptor richness, and transferability into Stage~2.
 
 \subsection{Stage~2: Physics-Informed Features (+8 features $\to$ 160)}
 
@@ -527,6 +540,38 @@ Test $\rhoS$ improves monotonically: $0.710 \to 0.711 \to 0.748$.  The
 decisive jump occurs at Stage~2, where physics features increase ranking
 quality by $+0.037$ on the test set---a meaningful gain for a materials
 screening application.
+
+\subsection{Feature Importance of the Final Stage~2 Model}
+
+To interpret the final representative model, permutation feature importance was
+computed on the Stage~2 physics model using the full Stage~2 feature set.
+Figure~\ref{fig:final_stage2_feat_imp} shows the top features (green =
+physics-informed, blue = composition/geometry).
+
+\begin{figure}[H]
+      \centering
+      \includegraphics[width=0.95\textwidth]{final_stage2_physics_feature_importance.png}
+      \caption{Permutation feature importance for the final Stage~2 physics model.
+      Physics-informed descriptors are shown in green and composition/geometry
+      descriptors in blue.}
+      \label{fig:final_stage2_feat_imp}
+\end{figure}
+
+The strongest contributors are \texttt{sigma\_is\_coerced} (0.267),
+\texttt{lattice\_c} (0.244), and \texttt{ewald\_energy\_avg} (0.226),
+followed by embedding features and Li-site descriptors such as
+\texttt{li\_voronoi\_cn\_avg}.  This profile supports the Stage~2 results:
+physics-informed terms provide substantial predictive signal while structural
+geometry remains essential, explaining why Stage~2 yields the best held-out
+ranking performance.
+
+The prominence of \texttt{sigma\_is\_coerced} is expected in this pipeline:
+it marks samples where the original conductivity was reported as a thresholded
+value (e.g., ``$<10^{-10}$'') and then coerced during target construction.
+These censored measurements follow a different uncertainty regime, so the
+tree-based model uses this flag as an early split to separate them from
+precisely measured values.  Therefore, its high importance should be read as a
+measurement-context effect rather than a model discrepancy.
 
 \subsection{Best Hyperparameters}
 

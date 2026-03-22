@@ -75,6 +75,8 @@ from src.utils import (
 	save_parity_plot,
 	save_histogram,
 	generate_stage1_report,
+	compute_regression_metrics,
+	compute_spearman_rho,
 )
 from src.data_processing import load_data, clean_data, add_target_log10_sigma, coerce_sigma_series, TARGET_COL
 from src.features import (
@@ -416,9 +418,11 @@ def main():
 		fold_scores, overall_metrics, oof = run_cv_with_predefined_splits(X, y, splits, config)
 		
 		# Log results
+		spearman_cv = compute_spearman_rho(y.values, oof)
 		logger.info(f"[{exp_name}] Fold RMSEs: {[f'{s:.4f}' for s in fold_scores]}")
 		logger.info(f"[{exp_name}] Overall CV Metrics:")
 		logger.info(f"    R2:   {overall_metrics['r2']:.4f}")
+		logger.info(f"    Spearman: {spearman_cv:.4f}")
 		logger.info(f"    RMSE: {overall_metrics['rmse']:.4f}")
 		logger.info(f"    MAE:  {overall_metrics['mae']:.4f}")
 		
@@ -432,6 +436,7 @@ def main():
 			parity_plot_path,
 			title=f"Stage 1 5-Fold CV: {exp_name}",
 			r2_linear_from_log=False,
+			spearman_rho=spearman_cv,
 		)
 		
 		# Train final model and predict on test set
@@ -453,6 +458,13 @@ def main():
 		# Test-set parity plot (log target, back-transformed R² shown)
 		if TARGET_COL in test_df.columns:
 			test_y = test_df[TARGET_COL].values
+			test_metrics = compute_regression_metrics(test_y, preds)
+			test_spearman = compute_spearman_rho(test_y, preds)
+			logger.info(f"[{exp_name}] Test Metrics:")
+			logger.info(f"    R2:   {test_metrics['r2']:.4f}")
+			logger.info(f"    Spearman: {test_spearman:.4f}")
+			logger.info(f"    RMSE: {test_metrics['rmse']:.4f}")
+			logger.info(f"    MAE:  {test_metrics['mae']:.4f}")
 			test_parity_path = os.path.join(results_dir, f"stage1_test_parity_{exp_name}.png")
 			save_parity_plot(
 				test_y,
@@ -460,6 +472,7 @@ def main():
 				test_parity_path,
 				title=f"Stage 1 Test: {exp_name}",
 				r2_linear_from_log=False,
+				spearman_rho=test_spearman,
 			)
 	
 	# -----------------------------------------------------------------------------------------

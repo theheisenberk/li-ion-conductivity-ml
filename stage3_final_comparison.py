@@ -31,6 +31,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import GroupKFold
+from sklearn.ensemble import HistGradientBoostingRegressor
+from sklearn.inspection import permutation_importance
 
 
 def clear_pycache(root_path: Path):
@@ -396,6 +398,70 @@ def save_error_cdf(models: dict, path: str, title: str = "Cumulative Error Distr
     plt.tight_layout()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+# =================================================================================================
+# Visualization 5: Permutation Feature Importance for Final Stage 2 Physics Model
+# =================================================================================================
+
+def save_final_feature_importance(
+    model,
+    X: pd.DataFrame,
+    y: pd.Series,
+    physics_cols: list,
+    png_path: str,
+    csv_path: str,
+):
+    """
+    Computes permutation feature importance for the final Stage 2 physics model
+    and saves both a CSV and a top-feature bar plot.
+    """
+    perm = permutation_importance(
+        model,
+        X,
+        y,
+        n_repeats=10,
+        random_state=42,
+        n_jobs=-1,
+    )
+
+    imp_df = pd.DataFrame({
+        "feature": X.columns,
+        "importance": perm.importances_mean,
+        "std": perm.importances_std,
+    }).sort_values("importance", ascending=False)
+
+    os.makedirs(os.path.dirname(csv_path), exist_ok=True)
+    imp_df.to_csv(csv_path, index=False)
+
+    top_n = min(25, len(imp_df))
+    top_df = imp_df.head(top_n).iloc[::-1]
+    physics_set = set(physics_cols)
+    colors = ["#2ca02c" if f in physics_set else "#1f77b4" for f in top_df["feature"]]
+
+    fig, ax = plt.subplots(figsize=(10, 8))
+    sns.set_theme(style="whitegrid")
+    ax.barh(
+        top_df["feature"],
+        top_df["importance"],
+        xerr=top_df["std"],
+        color=colors,
+        alpha=0.9,
+    )
+    ax.set_xlabel("Permutation Importance", fontsize=12)
+    ax.set_ylabel("Feature", fontsize=12)
+    ax.set_title(
+        "Final Stage 2 Physics Model: Top Permutation Importances\n"
+        "(Green = physics-informed, Blue = composition/geometry)",
+        fontsize=13,
+        fontweight="bold",
+    )
+    ax.grid(axis="x", alpha=0.3)
+    plt.tight_layout()
+
+    os.makedirs(os.path.dirname(png_path), exist_ok=True)
+    fig.savefig(png_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
 
 
@@ -805,6 +871,36 @@ def main():
         title="Cumulative |Error| Distribution (Test Set)",
     )
     logger.info("  Error CDF -> final_error_cdf_*.png")
+
+    # -------------------------------------------------------------------------------------
+    # Visualization 5: Permutation feature importance for FINAL model (Stage 2 + Physics)
+    # -------------------------------------------------------------------------------------
+    logger.info("Computing permutation feature importance for final Stage 2 physics model...")
+    final_spec = models_spec["Stage 2: + Physics"]
+    final_available = [c for c in final_spec["feature_cols"] if c in final_spec["train_df"].columns]
+
+    X_final = final_spec["train_df"][final_available].copy()
+    X_final.replace([np.inf, -np.inf], np.nan, inplace=True)
+    X_final = X_final.fillna(0)
+
+    final_model = HistGradientBoostingRegressor(
+        random_state=42,
+        **(final_spec["params"] or {}),
+    )
+    final_model.fit(X_final, y_train)
+
+    fi_png_path = os.path.join(results_dir, "final_stage2_physics_feature_importance.png")
+    fi_csv_path = os.path.join(results_dir, "final_stage2_physics_feature_importance.csv")
+    save_final_feature_importance(
+        model=final_model,
+        X=X_final,
+        y=y_train,
+        physics_cols=physics_feature_cols,
+        png_path=fi_png_path,
+        csv_path=fi_csv_path,
+    )
+    logger.info(f"  Final model feature-importance plot -> {fi_png_path}")
+    logger.info(f"  Final model feature-importance CSV  -> {fi_csv_path}")
 
     # -------------------------------------------------------------------------------------
     # Summary table
