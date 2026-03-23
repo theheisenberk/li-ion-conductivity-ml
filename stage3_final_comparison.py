@@ -409,6 +409,8 @@ def save_final_feature_importance(
     model,
     X: pd.DataFrame,
     y: pd.Series,
+    stage0_cols: list,
+    stage1_geometry_cols: list,
     physics_cols: list,
     png_path: str,
     csv_path: str,
@@ -437,8 +439,19 @@ def save_final_feature_importance(
 
     top_n = min(25, len(imp_df))
     top_df = imp_df.head(top_n).iloc[::-1]
-    physics_set = set(physics_cols)
-    colors = ["#2ca02c" if f in physics_set else "#1f77b4" for f in top_df["feature"]]
+
+    stage0_set = set(stage0_cols)
+    stage1_set = set(stage1_geometry_cols) - stage0_set
+    stage2_set = set(physics_cols)
+
+    def feature_color(feature_name: str) -> str:
+        if feature_name in stage2_set:
+            return "#2ca02c"  # green: Stage 2 physics-informed
+        if feature_name in stage1_set:
+            return "#d62728"  # red: Stage 1 geometry/structure
+        return "#1f77b4"      # blue: Stage 0 composition
+
+    colors = [feature_color(f) for f in top_df["feature"]]
 
     fig, ax = plt.subplots(figsize=(10, 8))
     sns.set_theme(style="whitegrid")
@@ -453,11 +466,20 @@ def save_final_feature_importance(
     ax.set_ylabel("Feature", fontsize=12)
     ax.set_title(
         "Final Stage 2 Physics Model: Top Permutation Importances\n"
-        "(Green = physics-informed, Blue = composition/geometry)",
+        "(Blue = Stage 0 composition, Red = Stage 1 geometry, Green = Stage 2 physics)",
         fontsize=13,
         fontweight="bold",
     )
     ax.grid(axis="x", alpha=0.3)
+
+    from matplotlib.patches import Patch
+    legend_handles = [
+        Patch(facecolor="#1f77b4", label="Stage 0: Composition"),
+        Patch(facecolor="#d62728", label="Stage 1: Geometry/Structure"),
+        Patch(facecolor="#2ca02c", label="Stage 2: Physics-informed"),
+    ]
+    ax.legend(handles=legend_handles, loc="lower right", framealpha=0.9)
+
     plt.tight_layout()
 
     os.makedirs(os.path.dirname(png_path), exist_ok=True)
@@ -895,6 +917,8 @@ def main():
         model=final_model,
         X=X_final,
         y=y_train,
+        stage0_cols=stage0_feature_cols,
+        stage1_geometry_cols=stage1_geometry_cols,
         physics_cols=physics_feature_cols,
         png_path=fi_png_path,
         csv_path=fi_csv_path,

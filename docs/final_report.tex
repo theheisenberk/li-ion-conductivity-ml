@@ -546,32 +546,41 @@ screening application.
 To interpret the final representative model, permutation feature importance was
 computed on the Stage~2 physics model using the full Stage~2 feature set.
 Figure~\ref{fig:final_stage2_feat_imp} shows the top features (green =
-physics-informed, blue = composition/geometry).
+physics-informed, red = Stage~1 geometry/structure, blue = Stage~0
+composition).
 
 \begin{figure}[H]
       \centering
       \includegraphics[width=0.95\textwidth]{final_stage2_physics_feature_importance.png}
       \caption{Permutation feature importance for the final Stage~2 physics model.
-      Physics-informed descriptors are shown in green and composition/geometry
-      descriptors in blue.}
+      Stage-aware color coding is used: blue = Stage~0 composition features,
+      red = Stage~1 geometry/structure features, and green = Stage~2
+      physics-informed features.}
       \label{fig:final_stage2_feat_imp}
 \end{figure}
 
-The strongest contributors are \texttt{sigma\_is\_coerced} (0.267),
-\texttt{lattice\_c} (0.244), and \texttt{ewald\_energy\_avg} (0.226),
-followed by embedding features and Li-site descriptors such as
-\texttt{li\_voronoi\_cn\_avg}.  This profile supports the Stage~2 results:
-physics-informed terms provide substantial predictive signal while structural
-geometry remains essential, explaining why Stage~2 yields the best held-out
-ranking performance.
+Comparing Figure~\ref{fig:feat_imp} (Stage~1 geometry model) with
+Figure~\ref{fig:final_stage2_feat_imp} (final Stage~2 physics model) shows a
+clear ranking shift.  In Stage~1, \texttt{lattice\_c} was the top feature
+(0.203) and \texttt{sigma\_is\_coerced} was second (0.156).  In the final
+Stage~2 model, \texttt{sigma\_is\_coerced} rises to first (0.267), followed
+by \texttt{lattice\_c} (0.244) and \texttt{ewald\_energy\_avg} (0.226).
 
-The prominence of \texttt{sigma\_is\_coerced} is expected in this pipeline:
-it marks samples where the original conductivity was reported as a thresholded
-value (e.g., ``$<10^{-10}$'') and then coerced during target construction.
-These censored measurements follow a different uncertainty regime, so the
-tree-based model uses this flag as an early split to separate them from
-precisely measured values.  Therefore, its high importance should be read as a
-measurement-context effect rather than a model discrepancy.
+This change is consistent with the modelling setup.  The
+\texttt{sigma\_is\_coerced} flag marks censored target values (thresholded
+conductivities such as ``$<10^{-10}$''), which represent a distinct
+measurement-uncertainty regime.  After adding sparse but high-impact
+physics-informed descriptors, the boosted trees gain stronger interaction
+structure and use \texttt{sigma\_is\_coerced} more aggressively as an early
+partitioning variable, increasing its permutation importance.
+
+Needless to say, this does not mean that \texttt{sigma\_is\_coerced} is a physical transport
+descriptor.  Instead, it functions as a data-quality/context indicator that
+helps the model treat censored measurements appropriately before relying on
+downstream feature interactions.  The principal structure--property signal for
+the Stage~2 ranking improvement still comes from physically meaningful
+Stage~1/Stage~2 descriptors such as \texttt{lattice\_c},
+\texttt{ewald\_energy\_avg}, and \texttt{li\_voronoi\_cn\_avg}.
 
 \subsection{Best Hyperparameters}
 
