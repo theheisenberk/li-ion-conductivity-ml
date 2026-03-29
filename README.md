@@ -67,7 +67,7 @@ python stage3_final_comparison.py
 
 ## Key Results
 
-| Stage | Description | CV R² | Test Spearman rho |
+| Stage | Description | CV R² | Test Spearman ρ |
 |-------|-------------|------:|------------------:|
 | 0 | Composition (Magpie) | 0.746 | 0.710 |
 | 1 | + Structural geometry | 0.737 | 0.711 |
