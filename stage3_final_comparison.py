@@ -28,6 +28,8 @@ sys.dont_write_bytecode = True
 
 import numpy as np
 import pandas as pd
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import GroupKFold
@@ -126,7 +128,7 @@ def save_combined_parity_plot(
         path: output file path
         title: plot title
     """
-    fig, ax = plt.subplots(figsize=(9, 9))
+    fig, ax = plt.subplots(figsize=(8, 8))
     sns.set_theme(style="whitegrid")
 
     # Compute global axis limits across all models
@@ -147,7 +149,7 @@ def save_combined_parity_plot(
     # y=x reference line
     ax.plot(
         [min_val, max_val], [min_val, max_val],
-        "k--", lw=1.5, alpha=0.5, label="Perfect prediction",
+        "k--", lw=1.4, alpha=0.5, label="Perfect prediction",
     )
 
     # Plot each model
@@ -180,16 +182,19 @@ def save_combined_parity_plot(
     ax.set_xlim(min_val, max_val)
     ax.set_ylim(min_val, max_val)
     ax.set_aspect("equal")
-    ax.set_xlabel(r"Actual log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=13)
-    ax.set_ylabel(r"Predicted log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=13)
-    ax.set_title(title, fontsize=15, fontweight="bold")
+    ax.set_xlabel(r"Actual log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=12)
+    ax.set_ylabel(r"Predicted log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=12)
+    ax.set_title(title, fontsize=13, fontweight="bold")
+    ax.grid(True, alpha=0.65, color="#b9b9b9", linewidth=1.0)
+    for side in ["top", "right", "bottom", "left"]:
+        ax.spines[side].set_visible(True)
+        ax.spines[side].set_color("#b3b3b3")
+        ax.spines[side].set_linewidth(1.0)
 
     ax.legend(
         loc="upper left",
-        fontsize=9.5,
+        fontsize=10,
         framealpha=0.9,
-        handletextpad=0.4,
-        borderpad=0.6,
     )
 
     plt.tight_layout()
@@ -246,6 +251,50 @@ def save_triptych_parity(models: dict, path: str, title: str = "Model Comparison
             ax.set_ylabel(r"Predicted log$_{10}$($\sigma$)", fontsize=11)
 
     fig.suptitle(title, fontsize=14, fontweight="bold", y=1.02)
+    plt.tight_layout()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fig.savefig(path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+
+def save_single_parity_plot(
+    name: str,
+    y_true,
+    y_pred,
+    color: str,
+    path: str,
+    title: str,
+):
+    """Save a single-model parity plot (used to complement triptych panels)."""
+    yt = np.asarray(y_true, dtype=float)
+    yp = np.asarray(y_pred, dtype=float)
+    mask = np.isfinite(yt) & np.isfinite(yp)
+    yt = yt[mask]
+    yp = yp[mask]
+
+    metrics = compute_regression_metrics(yt, yp)
+    rho = spearman_rho(yt, yp)
+
+    mn = min(np.min(yt), np.min(yp))
+    mx = max(np.max(yt), np.max(yp))
+    pad = 0.05 * (mx - mn) if mx > mn else 1.0
+    lo, hi = mn - pad, mx + pad
+
+    fig, ax = plt.subplots(figsize=(8, 8))
+    sns.set_theme(style="whitegrid")
+    ax.scatter(yt, yp, c=color, alpha=0.55, s=40, edgecolors="none")
+    ax.plot([lo, hi], [lo, hi], "k--", lw=1.4, alpha=0.5, label="Perfect prediction")
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect("equal")
+    ax.set_xlabel(r"Actual log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=12)
+    ax.set_ylabel(r"Predicted log$_{10}$($\sigma$ / S cm$^{-1}$)", fontsize=12)
+    ax.set_title(
+        f"{title}\n{name} (R\u00b2={metrics['r2']:.4f}, \u03c1={rho:.4f})",
+        fontsize=13,
+        fontweight="bold",
+    )
+    ax.legend(loc="upper left", fontsize=10, framealpha=0.9)
     plt.tight_layout()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     fig.savefig(path, dpi=300, bbox_inches="tight")
@@ -747,6 +796,14 @@ def main():
     # -------------------------------------------------------------------------------------
     cv_plot_data = {}
     test_plot_data = {}
+    cv_predictions_long = []
+    test_predictions_long = []
+
+    model_slugs = {
+        "Stage 0: Composition (Magpie)": "stage0_composition",
+        "Stage 1: + Geometry": "stage1_geometry",
+        "Stage 2: + Physics": "stage2_physics",
+    }
 
     for name, spec in models_spec.items():
         logger.info("=" * 80)
@@ -782,6 +839,24 @@ def main():
             "marker": spec["marker"],
         }
 
+        train_ids = (
+            spec["train_df"]["ID"].values
+            if "ID" in spec["train_df"].columns
+            else np.arange(len(spec["train_df"]))
+        )
+        cv_df = pd.DataFrame({
+            "ID": train_ids,
+            "model": name,
+            "split": "cv_oof",
+            "y_true": y_train.values,
+            "y_pred": oof,
+        })
+        cv_predictions_long.append(cv_df)
+
+        cv_out_path = os.path.join(results_dir, f"{model_slugs[name]}_cv_predictions.csv")
+        cv_df.to_csv(cv_out_path, index=False)
+        logger.info(f"  Saved CV OOF predictions -> {cv_out_path}")
+
         # Final model + test predictions
         X_test = spec["test_df"][[c for c in available if c in spec["test_df"].columns]].copy()
         X_test = X_test.reindex(columns=X.columns, fill_value=0)
@@ -803,6 +878,37 @@ def main():
                 "color": spec["color"],
                 "marker": spec["marker"],
             }
+
+            test_ids = (
+                spec["test_df"]["ID"].values
+                if "ID" in spec["test_df"].columns
+                else np.arange(len(spec["test_df"]))
+            )
+            test_df_export = pd.DataFrame({
+                "ID": test_ids,
+                "model": name,
+                "split": "test",
+                "y_true": test_y,
+                "y_pred": preds,
+            })
+            test_predictions_long.append(test_df_export)
+
+            test_out_path = os.path.join(results_dir, f"{model_slugs[name]}_test_predictions.csv")
+            test_df_export.to_csv(test_out_path, index=False)
+            logger.info(f"  Saved test predictions -> {test_out_path}")
+
+    # Export combined long-format prediction tables for reproducibility
+    if cv_predictions_long:
+        cv_all = pd.concat(cv_predictions_long, ignore_index=True)
+        cv_all_path = os.path.join(results_dir, "final_all_models_cv_predictions.csv")
+        cv_all.to_csv(cv_all_path, index=False)
+        logger.info(f"Saved combined CV prediction table -> {cv_all_path}")
+
+    if test_predictions_long:
+        test_all = pd.concat(test_predictions_long, ignore_index=True)
+        test_all_path = os.path.join(results_dir, "final_all_models_test_predictions.csv")
+        test_all.to_csv(test_all_path, index=False)
+        logger.info(f"Saved combined test prediction table -> {test_all_path}")
 
     # -------------------------------------------------------------------------------------
     # Visualization: Combined Overlay (original, kept for reference)
@@ -840,6 +946,28 @@ def main():
         title="Held-Out Test Set",
     )
     logger.info("  Triptych test -> final_triptych_test.png")
+
+    # Standalone parity plots (3 CV + 3 test), complementary to the triptychs
+    for name in models_spec.keys():
+        slug = model_slugs[name]
+        save_single_parity_plot(
+            name=name,
+            y_true=cv_plot_data[name]["y_true"],
+            y_pred=cv_plot_data[name]["y_pred"],
+            color=cv_plot_data[name]["color"],
+            path=os.path.join(results_dir, f"final_{slug}_cv_parity.png"),
+            title="5-Fold Cross-Validation",
+        )
+        if name in test_plot_data:
+            save_single_parity_plot(
+                name=name,
+                y_true=test_plot_data[name]["y_true"],
+                y_pred=test_plot_data[name]["y_pred"],
+                color=test_plot_data[name]["color"],
+                path=os.path.join(results_dir, f"final_{slug}_test_parity.png"),
+                title="Held-Out Test Set",
+            )
+    logger.info("  Standalone parity plots -> final_*_(cv|test)_parity.png")
 
     # -------------------------------------------------------------------------------------
     # Visualization 2: Pairwise overlays (Stage 0 vs 1, Stage 1 vs 2)
