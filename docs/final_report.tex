@@ -121,7 +121,8 @@ more detailed discussion is provided in Section~\ref{sec:objective}.
 \section{Dataset}
 %=============================================================================
 
-The dataset consists of 478 training samples and 121 held-out test samples of
+The dataset is derived from the \href{https://github.com/NRC-Mila/OBELiX}{OBELiX}
+dataset and consists of 478 training samples and 121 held-out test samples of
 crystalline lithium-ion conductors.  Each sample is identified by a unique ID
 and provides:
 
@@ -273,6 +274,16 @@ test ranking metric in this block is achieved by \texttt{stage1\_basic\_struct}
 (test $\rhoS = 0.7157$), with \texttt{stage1\_geometry} very close
 ($\rhoS = 0.7114$).
 
+Crucially, even though \texttt{stage1\_basic\_struct} has a slightly better Spearman
+$\rho$, \texttt{stage1\_geometry} exhibits a significant increase of approximately
+10\% in $\Rtwo$. This is important given the underlying correlation between $\Rtwo$
+and $\rhoS$. While explicit runs demonstrating this are not included here, moving
+forward with multiple models revealed that improving $\Rtwo$ at this stage proved
+useful later, even if it did not change the predicted ordering immediately.
+Conceptually, this stage improved the continuous precision of the model, bringing
+it closer to the threshold required for the discrete Spearman rank correlation to
+improve in subsequent stages.
+
 \paragraph{Decision to exclude space-group one-hot encoding.}
 Adding the 230 space-group one-hot columns (\texttt{stage1\_full\_struct},
 382~features) increases test $\Rtwo$ but does \emph{not} improve held-out
@@ -413,11 +424,13 @@ This choice is pragmatic:
 \begin{enumerate}[leftmargin=*]
       \item \textbf{Gradient-based learners require a differentiable loss.}
             \texttt{HistGradientBoostingRegressor} internally minimises the
-            squared-error loss.  Replacing this with a rank-based objective would
-            require either a custom loss function with non-trivial sub-gradient
-            computation, or a wrapper that treats the model as a black-box
-            ranking function---both substantially more complex to implement and
-            validate.
+            squared-error loss. The Spearman correlation involves a rank transformation,
+            which is a piecewise-constant, non-smooth function of the predictions.
+            Optimising for it directly would require either surrogate-gradient tricks,
+            a custom loss function with non-trivial sub-gradient computation, or a
+            fully black-box wrapper (e.g.\ evolutionary strategies via Optuna).
+            These approaches are less sample-efficient, and substantially more
+            complex to implement and validate than the smooth RMSE objective used here.
       \item \textbf{RMSE in log-space has a clean interpretation.}
             Since the target is $\logsigma$, a residual in log-space is
             \[
@@ -431,13 +444,6 @@ This choice is pragmatic:
             on the original conductivity scale.  This is a sensible proxy for
             ranking because reducing multiplicative errors tends to preserve
             the correct ordering.
-      \item \textbf{Spearman is non-smooth and expensive to differentiate.}
-            The Spearman correlation involves a rank transformation, which is
-            a piecewise-constant function of the predictions.  Optimising it
-            directly via Optuna would require either surrogate-gradient tricks
-            or a fully black-box approach (e.g.\ evolutionary strategies), both
-            of which are less sample-efficient than the smooth RMSE objective
-            used here.
 \end{enumerate}
 
 A future iteration of this project could implement a direct $\rhoS$
@@ -654,8 +660,7 @@ Stage~1/Stage~2 descriptors such as \texttt{lattice\_c},
             \includegraphics[width=\textwidth]{final_pairwise_s1_vs_s2_test.png}
             \caption{Test: Stage~1 vs Stage~2.}
       \end{subfigure}
-      \caption{Pairwise overlays of consecutive stages.  Two-model overlays
-            reduce visual clutter compared to the three-model combined plot.}
+      \caption{Pairwise overlays of consecutive stages to illustrate the incremental improvements at each stage.}
       \label{fig:pairwise}
 \end{figure}
 
