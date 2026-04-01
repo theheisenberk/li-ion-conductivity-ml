@@ -99,3 +99,7 @@ data/raw/
 ```
 
 The files are included in this repository under `data/raw/` and were originally sourced from the [OBELiX GitHub repository](https://github.com/NRC-Mila/OBELiX/tree/main/data/downloads). The OBELiX dataset is licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).
