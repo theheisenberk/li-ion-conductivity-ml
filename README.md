@@ -75,6 +75,12 @@ python stage3_final_comparison.py
 
 The full report is available at [`docs/final_report.pdf`](docs/final_report.pdf).
 
+## ⚠️ Important: Retraining for Real-World Screening
+
+The models in this repository were trained using a **train/test split** to enable fair evaluation of predictive performance. As a result, they have **not** seen the full dataset and are **not** optimized for real-world screening of new candidate materials.
+
+If you intend to use this pipeline for actual materials screening, you **must retrain** the model on the **combined train + test dataset** so that it learns from all available experimental data and generalizes as broadly as possible to unseen compositions.
+
 ## Data
 
 This project uses the **OBELiX** dataset (Open solid Battery Electrolytes with Li: an eXperimental dataset), a curated collection of 599 synthesized solid-electrolyte materials with experimentally measured room-temperature ionic conductivities and crystallographic descriptions.
